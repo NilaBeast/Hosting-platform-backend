@@ -41,6 +41,7 @@ app.use("/api/domain-search", require("./routes/domainSearch.routes"));
 app.use("/api/admin", require("./routes/admin.routes"));
 app.use("/api/orders", require("./routes/order.routes"));
 app.use("/api/admin/billing", require("./routes/adminBilling.routes"));
+app.use("/api/admin/domain-pricing", require("./routes/adminDomain.routes"));
 /* ===============================
    STATIC SITES
 ================================ */
