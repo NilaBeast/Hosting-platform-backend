@@ -42,6 +42,7 @@ app.use("/api/admin", require("./routes/admin.routes"));
 app.use("/api/orders", require("./routes/order.routes"));
 app.use("/api/admin/billing", require("./routes/adminBilling.routes"));
 app.use("/api/admin/domain-pricing", require("./routes/adminDomain.routes"));
+app.use("/api/admin/settings", require("./routes/adminSettings.routes"));
 /* ===============================
    STATIC SITES
 ================================ */

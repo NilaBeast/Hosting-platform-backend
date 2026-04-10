@@ -24,6 +24,11 @@ const Plan = sequelize.define("Plan", {
   mailing_lists: DataTypes.INTEGER,
   team_users: DataTypes.INTEGER,
 
+  pricing_json: {
+  type: DataTypes.JSON,
+  allowNull: true,
+},
+
   price: DataTypes.FLOAT,
 });
 

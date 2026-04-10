@@ -1,7 +1,44 @@
 const Domain = require("../models/Domain");
 const HostingAccount = require("../models/HostingAccount");
 const domainService = require("../services/domain.service");
+const DomainPricing = require("../models/DomainPricing");
 
+/* ===============================
+   GET MARKETPLACE DOMAINS
+================================ */
+exports.getAvailableDomains = async (req, res) => {
+  try {
+    const domains = await DomainPricing.findAll({
+      order: [
+        ["is_spotlight", "DESC"], // 🔥 spotlight first
+        ["tld", "ASC"],
+      ],
+    });
+
+    const data = domains.map((d) => {
+      const regBase = d.register_price;
+      const regMargin = d.register_margin || 0;
+
+      return {
+        id: d.id,
+        tld: d.tld,
+        tag: d.tag,
+        is_spotlight: d.is_spotlight,
+
+        base_price: regBase,
+        margin: regMargin,
+        final_price: regBase + regMargin,
+
+        currency: d.currency,
+      };
+    });
+
+    res.json(data);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json("Failed");
+  }
+};
 /* ===============================
    ADD DOMAIN (MANUAL ONLY)
 ================================ */
@@ -107,3 +144,4 @@ exports.addToCpanel = async (req, res) => {
     res.status(500).json("Failed to add to cPanel");
   }
 };
+

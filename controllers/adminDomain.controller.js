@@ -1,39 +1,103 @@
 const DomainPricing = require("../models/DomainPricing");
 
-/* GET ALL */
+/* ===============================
+   GET ALL
+================================ */
 exports.getDomainPricing = async (req, res) => {
-  try {
-    const pricing = await DomainPricing.findAll({
-      order: [["tld", "ASC"]],
-    });
+  const data = await DomainPricing.findAll({
+    order: [["tld", "ASC"]],
+  });
 
-    res.json(pricing);
+  res.json(data);
+};
+
+/* ===============================
+   🔥 UPDATE MARGINS (FIXED)
+================================ */
+exports.updateMargins = async (req, res) => {
+  try {
+    const {
+      id,
+      register_margin,
+      renew_margin,
+      transfer_margin,
+    } = req.body;
+
+    const domain = await DomainPricing.findByPk(id);
+    if (!domain) return res.status(404).json("Not found");
+
+    // 🔥 IMPORTANT FIX: only update if provided
+    if (register_margin !== undefined) {
+      domain.register_margin = Number(register_margin);
+    }
+
+    if (renew_margin !== undefined) {
+      domain.renew_margin = Number(renew_margin);
+    }
+
+    if (transfer_margin !== undefined) {
+      domain.transfer_margin = Number(transfer_margin);
+    }
+
+    await domain.save();
+
+    res.json({ message: "Margins updated" });
   } catch (err) {
+    console.log(err);
     res.status(500).json("Failed");
   }
 };
 
-/* UPDATE */
-exports.updateDomainPricing = async (req, res) => {
-  try {
-    const { id, register_price, renew_price, transfer_price } = req.body;
+/* ===============================
+   TAG
+================================ */
+exports.updateTag = async (req, res) => {
+  const { id, tag } = req.body;
 
-    const domain = await DomainPricing.findByPk(id);
+  const domain = await DomainPricing.findByPk(id);
+  if (!domain) return res.status(404).json("Not found");
 
-    if (!domain) return res.status(404).json("Not found");
+  domain.tag = tag;
+  await domain.save();
 
-    domain.register_price = register_price;
-    domain.renew_price = renew_price;
-    domain.transfer_price = transfer_price;
+  res.json({ message: "Tag updated" });
+};
 
-    // 🔥 LOCK THIS PRICE
-    domain.is_custom = true;
+/* ===============================
+   SPOTLIGHT (MAX 10)
+================================ */
+exports.toggleSpotlight = async (req, res) => {
+  const { id } = req.body;
 
-    await domain.save();
+  const domain = await DomainPricing.findByPk(id);
 
-    res.json({ message: "Updated & Locked" });
-  } catch (err) {
-    console.log(err);
-    res.status(500).json("Update failed");
+  const count = await DomainPricing.count({
+    where: { is_spotlight: true },
+  });
+
+  if (!domain.is_spotlight && count >= 10) {
+    return res.status(400).json("Only 10 allowed");
   }
+
+  domain.is_spotlight = !domain.is_spotlight;
+
+  await domain.save();
+
+  res.json({ message: "Updated" });
+};
+
+/* ===============================
+   ADVANCED PRICING
+================================ */
+exports.updateAdvancedPricing = async (req, res) => {
+  const { id, pricing } = req.body;
+
+  const domain = await DomainPricing.findByPk(id);
+  if (!domain) return res.status(404).json("Not found");
+
+  domain.pricing_json = pricing;
+
+  await domain.save();
+
+  res.json({ message: "Saved" });
 };
