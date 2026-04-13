@@ -28,23 +28,50 @@ function generateStrongPassword() {
 ================================ */
 exports.createDomainOrder = async (req, res) => {
   try {
-    const { domain } = req.body;
+    const { domain, years = 1 } = req.body;
 
-    const tld = "." + domain.split(".").pop();
-    const pricing = await DomainPricing.findOne({ where: { tld } });
+    if (!domain) {
+      return res.status(400).json("Domain required");
+    }
+
+    /* ===============================
+       🔥 FIX TLD (SUPPORT .co.in)
+    ============================== */
+    const parts = domain.split(".");
+    let tld = "." + parts.slice(-2).join(".");
+
+    let pricing = await DomainPricing.findOne({ where: { tld } });
+
+    if (!pricing) {
+      tld = "." + parts.pop();
+      pricing = await DomainPricing.findOne({ where: { tld } });
+    }
 
     if (!pricing) {
       return res.status(400).json("Pricing not found");
     }
 
-    const price = pricing.register_price;
+    /* ===============================
+       🔥 MULTI YEAR PRICE
+    ============================== */
+    let basePrice = pricing.register_price || 0;
+
+    let total = basePrice * years;
+
+    /* ===============================
+       🔥 APPLY MARGIN (IF EXISTS)
+    ============================== */
+    if (pricing.register_margin) {
+      total += pricing.register_margin * years;
+    }
+
     const orderId = "order_" + Date.now();
 
     const response = await axios.post(
       `${process.env.CASHFREE_BASE_URL}/orders`,
       {
         order_id: orderId,
-        order_amount: price,
+        order_amount: total,
         order_currency: "INR",
         customer_details: {
           customer_id: req.user.id.toString(),
@@ -67,16 +94,27 @@ exports.createDomainOrder = async (req, res) => {
     await Order.create({
       user_id: req.user.id,
       domain,
-      type: "domain", // ✅ IMPORTANT
-      domain_price: price,
-      total_price: price,
+      type: "domain",
+
+      domain_price: basePrice,
+      total_price: total,
+
+      years,
+      tld,
+
       cashfree_order_id: orderId,
       payment_session_id: response.data.payment_session_id,
+
       status: "pending",
       domain_status: "pending",
     });
 
-    res.json(response.data);
+    res.json({
+      payment_session_id: response.data.payment_session_id,
+      order_id: orderId,
+      amount: total,
+    });
+
   } catch (err) {
     console.log(err.response?.data || err.message);
     res.status(500).json("Domain order failed");
@@ -88,33 +126,68 @@ exports.createDomainOrder = async (req, res) => {
 ================================ */
 exports.createPaymentOrder = async (req, res) => {
   try {
-    const { planId, domain } = req.body;
+    const { planId, domain, config } = req.body;
 
     const plan = await Plan.findByPk(planId);
     if (!plan) return res.status(404).json("Plan not found");
 
+    /* ===============================
+       DOMAIN PRICE
+    ============================== */
     let domainPrice = 0;
 
     if (domain) {
       const tld = "." + domain.split(".").pop();
-      const pricing = await DomainPricing.findOne({ where: { tld } });
+
+      const pricing = await DomainPricing.findOne({
+        where: { tld },
+      });
+
       domainPrice = pricing?.register_price || 0;
     }
 
-    const total = plan.price + domainPrice;
+    /* ===============================
+       🔥 PLAN PRICE (DYNAMIC)
+    ============================== */
+    let planPrice = 0;
+
+    if (config?.price) {
+      planPrice = Number(config.price);
+    } else {
+      planPrice = Number(plan.price); // fallback
+    }
+
+    /* ===============================
+       🔥 ADDONS
+    ============================== */
+    let addonPrice = 0;
+
+    if (config?.dns) addonPrice += 50;
+    if (config?.privacy) addonPrice += 100;
+
+    /* ===============================
+       🔥 FINAL TOTAL
+    ============================== */
+    const total = planPrice + domainPrice + addonPrice;
+
     const orderId = "order_" + Date.now();
 
+    /* ===============================
+       CASHFREE ORDER
+    ============================== */
     const response = await axios.post(
       `${process.env.CASHFREE_BASE_URL}/orders`,
       {
         order_id: orderId,
         order_amount: total,
-        order_currency: "INR",
+        order_currency: config?.currency || "INR",
+
         customer_details: {
           customer_id: req.user.id.toString(),
           customer_email: req.user.email,
           customer_phone: "9999999999",
         },
+
         order_meta: {
           return_url: `http://localhost:5173/plans?order_id=${orderId}`,
         },
@@ -128,16 +201,27 @@ exports.createPaymentOrder = async (req, res) => {
       }
     );
 
+    /* ===============================
+       SAVE ORDER
+    ============================== */
     await Order.create({
       user_id: req.user.id,
       plan_id: plan.id,
       domain,
-      type: "hosting", // ✅ IMPORTANT
-      plan_price: plan.price,
+      type: "hosting",
+
+      /* 🔥 STORE BREAKDOWN */
+      plan_price: planPrice,
       domain_price: domainPrice,
+      addon_price: addonPrice,
       total_price: total,
+
+      billing_cycle: config?.cycle || "monthly",
+      currency: config?.currency || "INR",
+
       cashfree_order_id: orderId,
       payment_session_id: response.data.payment_session_id,
+
       status: "pending",
       domain_status: "pending",
     });
@@ -146,6 +230,7 @@ exports.createPaymentOrder = async (req, res) => {
       payment_session_id: response.data.payment_session_id,
       order_id: orderId,
     });
+
   } catch (err) {
     console.log(err.response?.data || err.message);
     res.status(500).json("Payment order failed");
@@ -162,6 +247,9 @@ exports.verifyPayment = async (req, res) => {
   try {
     const { orderId } = req.body;
 
+    /* ===============================
+       VERIFY FROM CASHFREE
+    ============================== */
     const response = await axios.get(
       `${process.env.CASHFREE_BASE_URL}/orders/${orderId}`,
       {
@@ -195,16 +283,18 @@ exports.verifyPayment = async (req, res) => {
       return res.json({ pending: true });
     }
 
-    /* SUCCESS */
+    /* ===============================
+       SUCCESS PAYMENT
+    ============================== */
     order.status = "active";
     order.payment_status = "success";
     await order.save();
 
     const user = await User.findByPk(order.user_id);
 
-    /* ===============================
-       DOMAIN FLOW
-    ============================== */
+    /* =========================================================
+       🔥 DOMAIN ONLY FLOW
+    ========================================================= */
     if (order.type === "domain" || !order.plan_id) {
       await Domain.create({
         user_id: user.id,
@@ -215,6 +305,7 @@ exports.verifyPayment = async (req, res) => {
         status: "active",
       });
 
+      /* ===== CREATE INVOICE ===== */
       const invoiceNumber = "INV-" + Date.now();
 
       const invoice = await Invoice.create({
@@ -239,15 +330,31 @@ exports.verifyPayment = async (req, res) => {
         where: { invoice_id: invoice.id },
       });
 
+      /* ===== GENERATE PDF ===== */
       const pdfPath = await generateInvoicePDF(invoice, items);
+
+      console.log("PDF PATH:", pdfPath);
+
+      if (!pdfPath) throw new Error("PDF generation failed");
+
+      /* ===== SAVE PDF PATH ===== */
+      await Invoice.update(
+        { pdf_path: pdfPath },
+        { where: { id: invoice.id } }
+      );
+
+      const updatedInvoice = await Invoice.findByPk(invoice.id);
+      console.log("SAVED PATH:", updatedInvoice.pdf_path);
+
+      /* ===== SEND MAIL ===== */
       await sendInvoiceMail(user.email, pdfPath);
 
       return res.json({ success: true });
     }
 
-    /* ===============================
-       HOSTING FLOW (🔥 FIXED)
-    ============================== */
+    /* =========================================================
+       🔥 HOSTING + DOMAIN FLOW
+    ========================================================= */
     const plan = await Plan.findByPk(order.plan_id);
 
     const username = order.domain.split(".")[0].substring(0, 8);
@@ -276,14 +383,13 @@ exports.verifyPayment = async (req, res) => {
     await Domain.create({
       user_id: user.id,
       domain: order.domain,
-      cpanel_username: null,
       is_primary: true,
       is_added_to_cpanel: false,
       type: "register",
       status: "active",
     });
 
-    /* 🔥 INVOICE + MAIL (FIXED) */
+    /* ===== CREATE INVOICE ===== */
     const invoiceNumber = "INV-" + Date.now();
 
     const invoice = await Invoice.create({
@@ -298,7 +404,7 @@ exports.verifyPayment = async (req, res) => {
 
     await InvoiceItem.create({
       invoice_id: invoice.id,
-      description: plan.name + " Hosting Plan",
+      description: `${plan.name} Hosting Plan`,
       qty: 1,
       rate: order.plan_price,
       amount: order.plan_price,
@@ -316,14 +422,30 @@ exports.verifyPayment = async (req, res) => {
       where: { invoice_id: invoice.id },
     });
 
+    /* ===== GENERATE PDF ===== */
     const pdfPath = await generateInvoicePDF(invoice, items);
 
+    console.log("PDF PATH:", pdfPath);
+
+    if (!pdfPath) throw new Error("PDF generation failed");
+
+    /* ===== SAVE PDF PATH ===== */
+    await Invoice.update(
+      { pdf_path: pdfPath },
+      { where: { id: invoice.id } }
+    );
+
+    const updatedInvoice = await Invoice.findByPk(invoice.id);
+    console.log("SAVED PATH:", updatedInvoice.pdf_path);
+
+    /* ===== SEND MAIL ===== */
     await sendInvoiceMail(user.email, pdfPath);
 
     res.json({ success: true });
+
   } catch (err) {
-    console.log(err);
-    res.status(500).json("Verification failed");
+    console.error("❌ VERIFY PAYMENT ERROR:", err);
+    res.status(500).json(err.message || "Verification failed");
   }
 };
 
@@ -336,4 +458,23 @@ exports.getMyOrders = async (req, res) => {
   });
 
   res.json(orders);
+};
+
+exports.createCheckoutSession = async (req, res) => {
+  try {
+    const { planId, domain, config } = req.body;
+
+    const order = await Order.create({
+      user_id: req.user.id,
+      plan_id: planId || null,
+      domain,
+      type: planId ? "hosting" : "domain",
+      checkout_data: config, // 🔥 FULL CONFIG SAVED
+      status: "draft",
+    });
+
+    res.json({ orderId: order.id });
+  } catch (err) {
+    res.status(500).json("Checkout init failed");
+  }
 };

@@ -3,6 +3,8 @@ const InvoiceItem = require("../models/InvoiceItem");
 const User = require("../models/User");
 const { generateInvoicePDF } = require("../services/invoice.service");
 const { sendInvoiceMail } = require("../services/invoiceMail.service");
+const path = require("path");
+const fs = require("fs");
 
 /* GET ALL INVOICES */
 exports.getInvoices = async (req, res) => {
@@ -30,6 +32,10 @@ exports.createInvoice = async (req, res) => {
 
     const user = await User.findByPk(user_id);
 
+    if (!user) {
+      return res.status(404).json("User not found");
+    }
+
     const invoiceNumber = "INV-" + Date.now();
 
     const invoice = await Invoice.create({
@@ -41,6 +47,9 @@ exports.createInvoice = async (req, res) => {
       status: "paid",
     });
 
+    console.log("STEP 1: Invoice created:", invoice.id);
+
+    // create items
     for (const item of items) {
       await InvoiceItem.create({
         invoice_id: invoice.id,
@@ -55,25 +64,64 @@ exports.createInvoice = async (req, res) => {
       where: { invoice_id: invoice.id },
     });
 
+    console.log("STEP 2: Items ready");
+
+    // 🔥 GENERATE PDF
     const pdfPath = await generateInvoicePDF(invoice, invoiceItems);
 
-    invoice.pdf_path = pdfPath;
-    await invoice.save();
+    console.log("STEP 3: PDF PATH =", pdfPath);
 
-    await sendInvoiceMail(invoice.email, pdfPath);
+    if (!pdfPath) {
+      throw new Error("PDF path is undefined");
+    }
 
-    res.json({ message: "Invoice created", invoice });
+    // 🔥 FORCE UPDATE (IMPORTANT CHANGE)
+    await Invoice.update(
+      { pdf_path: pdfPath },
+      { where: { id: invoice.id } }
+    );
+
+    console.log("STEP 4: DB UPDATED");
+
+    // 🔥 FETCH AGAIN (IMPORTANT)
+    const updatedInvoice = await Invoice.findByPk(invoice.id);
+
+    console.log("STEP 5: SAVED VALUE =", updatedInvoice.pdf_path);
+
+    // SEND MAIL
+    await sendInvoiceMail(updatedInvoice.email, pdfPath);
+
+    res.json({
+      message: "Invoice created",
+      invoice: updatedInvoice,
+    });
+
   } catch (err) {
-    console.log(err);
-    res.status(500).json("Invoice creation failed");
+    console.error("❌ ERROR:", err);
+    res.status(500).json(err.message);
   }
 };
 
 /* DOWNLOAD PDF */
 exports.downloadInvoice = async (req, res) => {
-  const invoice = await Invoice.findByPk(req.params.id);
+  try {
+    const invoice = await Invoice.findByPk(req.params.id);
 
-  res.download(invoice.pdf_path);
+    if (!invoice || !invoice.pdf_path) {
+      return res.status(404).json("Invoice file not found");
+    }
+
+    const fullPath = path.join(__dirname, "../../", invoice.pdf_path);
+
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json("File missing on server");
+    }
+
+    res.download(fullPath);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json("Download failed");
+  }
 };
 
 /* RESEND INVOICE MAIL */

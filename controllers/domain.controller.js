@@ -10,14 +10,25 @@ exports.getAvailableDomains = async (req, res) => {
   try {
     const domains = await DomainPricing.findAll({
       order: [
-        ["is_spotlight", "DESC"], // 🔥 spotlight first
+        ["is_spotlight", "DESC"],
         ["tld", "ASC"],
       ],
     });
 
     const data = domains.map((d) => {
-      const regBase = d.register_price;
-      const regMargin = d.register_margin || 0;
+      /* 🔥 SAFE VALUES */
+      const regBase = Number(d.register_price || 0);
+      const regMargin = Number(d.register_margin || 0);
+
+      /* 🔥 FINAL PRICE LOGIC */
+      let finalPrice = 0;
+
+      if (regBase > 0) {
+        finalPrice = regBase + regMargin;
+      } else {
+        // 🔥 FALLBACK (important)
+        finalPrice = regMargin > 0 ? regMargin : 0;
+      }
 
       return {
         id: d.id,
@@ -27,9 +38,15 @@ exports.getAvailableDomains = async (req, res) => {
 
         base_price: regBase,
         margin: regMargin,
-        final_price: regBase + regMargin,
+        final_price: finalPrice,
 
         currency: d.currency,
+
+        /* 🔥 DEBUG (remove later) */
+        debug: {
+          base: regBase,
+          margin: regMargin,
+        },
       };
     });
 

@@ -2,28 +2,34 @@ const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
 
-exports.generateInvoicePDF = (invoice, items) => {
+exports.generateInvoicePDF = async (invoice, items) => {
   return new Promise((resolve, reject) => {
     try {
+      /* ================= SAFE DIRECTORY ================= */
       const invoicesDir = path.join(__dirname, "../../invoices");
 
       if (!fs.existsSync(invoicesDir)) {
         fs.mkdirSync(invoicesDir, { recursive: true });
       }
 
-      const fileName = `invoice_${invoice.invoice_number}.pdf`;
+      /* ================= SAFE FILE NAME ================= */
+      const safeInvoiceNumber = invoice.invoice_number.replace(/[^a-zA-Z0-9-_]/g, "");
+      const fileName = `invoice_${safeInvoiceNumber}.pdf`;
       const filePath = path.join(invoicesDir, fileName);
 
+      /* ================= CREATE DOC ================= */
       const doc = new PDFDocument({ size: "A4", margin: 50 });
       const stream = fs.createWriteStream(filePath);
+
       doc.pipe(stream);
 
       /* ================= HEADER LEFT ================= */
       doc
         .fontSize(20)
+        .fillColor("#000")
         .text("SERVICE INVOICE", 50, 50);
 
-      /* ================= HEADER RIGHT (LOGO + COMPANY DETAILS) ================= */
+      /* ================= HEADER RIGHT ================= */
       const logoPath = path.join(__dirname, "../../assets/logo.png");
 
       if (fs.existsSync(logoPath)) {
@@ -32,24 +38,14 @@ exports.generateInvoicePDF = (invoice, items) => {
 
       doc
         .fontSize(10)
-        .text("TECHZUNO SOLUTIONS (OPC) PRIVATE LIMITED", 300, 120, {
-          align: "right",
-        })
-        .text("Kolkata West Bengal 700039, India", {
-          align: "right",
-        })
-        .text("+916290340824", {
-          align: "right",
-        })
-        .text("info@techzuno.com", {
-          align: "right",
-        })
-        .text("www.techzuno.com", {
-          align: "right",
-        });
+        .fillColor("#000")
+        .text("TECHZUNO SOLUTIONS (OPC) PRIVATE LIMITED", 300, 120, { align: "right" })
+        .text("Kolkata, West Bengal 700039, India", { align: "right" })
+        .text("+91 6290340824", { align: "right" })
+        .text("info@techzuno.com", { align: "right" })
+        .text("www.techzuno.com", { align: "right" });
 
       /* ================= INVOICE INFO ================= */
-      doc.moveDown();
       doc.fontSize(10);
 
       doc.text(`Invoice No: ${invoice.invoice_number}`, 50, 180);
@@ -59,8 +55,8 @@ exports.generateInvoicePDF = (invoice, items) => {
 
       /* ================= BILL TO ================= */
       doc.text("Bill To:", 350, 180);
-      doc.text(invoice.customer_name, 350, 200);
-      doc.text(invoice.email, 350, 220);
+      doc.text(invoice.customer_name || "N/A", 350, 200);
+      doc.text(invoice.email || "N/A", 350, 220);
 
       /* ================= TABLE HEADER ================= */
       let tableTop = 280;
@@ -82,12 +78,14 @@ exports.generateInvoicePDF = (invoice, items) => {
       let subtotal = 0;
 
       items.forEach((item) => {
-        doc.text(item.description, 55, y);
-        doc.text(item.qty.toString(), 300, y);
-        doc.text(item.rate.toString(), 350, y);
-        doc.text(item.amount.toString(), 450, y);
+        const amount = Number(item.amount) || 0;
 
-        subtotal += item.amount;
+        doc.text(item.description || "-", 55, y);
+        doc.text(String(item.qty || 0), 300, y);
+        doc.text(`₹${item.rate || 0}`, 350, y);
+        doc.text(`₹${amount}`, 450, y);
+
+        subtotal += amount;
         y += 20;
       });
 
@@ -102,13 +100,13 @@ exports.generateInvoicePDF = (invoice, items) => {
       doc.fontSize(10).text("Notes:", 50, y + 80);
       doc.text("Thanks for your business.", 50, y + 95);
 
-      /* ================= QR CODE ================= */
+      /* ================= QR ================= */
       const qrPath = path.join(__dirname, "../../assets/qrcode.png");
       if (fs.existsSync(qrPath)) {
         doc.image(qrPath, 50, y + 140, { width: 90 });
       }
 
-      /* ================= SIGNATURE ================= */
+      /* ================= SIGN ================= */
       const signPath = path.join(__dirname, "../../assets/sign.png");
       if (fs.existsSync(signPath)) {
         doc.image(signPath, 400, y + 140, { width: 120 });
@@ -116,14 +114,25 @@ exports.generateInvoicePDF = (invoice, items) => {
 
       doc.text("Authorized Signature", 400, y + 200);
 
+      /* ================= FINALIZE ================= */
       doc.end();
 
+      /* ================= CRITICAL FIX ================= */
       stream.on("finish", () => {
-        resolve(`invoices/${fileName}`);
+        const relativePath = `invoices/${fileName}`;
+
+        console.log("✅ PDF Generated:", relativePath);
+
+        resolve(relativePath); // MUST return
       });
 
-      stream.on("error", reject);
+      stream.on("error", (err) => {
+        console.error("❌ PDF Stream Error:", err);
+        reject(err);
+      });
+
     } catch (err) {
+      console.error("❌ PDF Generation Error:", err);
       reject(err);
     }
   });

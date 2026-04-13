@@ -19,6 +19,8 @@ exports.checkDomain = async (req, res) => {
     const isAvailable = response.data?.available;
 
     let price = 0;
+    let years = [1];
+    let pricing_json = null;
 
     if (isAvailable) {
       const tld = "." + domain.split(".").pop();
@@ -27,16 +29,40 @@ exports.checkDomain = async (req, res) => {
         where: { tld },
       });
 
-      price = pricing?.register_price || 0;
+      console.log("🔍 DB PRICING:", pricing?.toJSON());
+
+      if (pricing) {
+        /* 🔥 SAFE NUMBER PARSE */
+        const base = parseFloat(pricing.register_price) || 0;
+        const margin = parseFloat(pricing.register_margin) || 0;
+
+        price = base + margin;
+
+        console.log("💰 CALC:", { base, margin, final: price });
+
+        /* ✅ ADVANCED PRICING */
+        pricing_json = pricing.pricing_json || null;
+
+        /* ✅ YEARS */
+        if (pricing_json && typeof pricing_json === "object") {
+          years = Object.keys(pricing_json)
+            .map(Number)
+            .filter((y) => !isNaN(y));
+        }
+      } else {
+        console.log("❌ NO PRICING FOUND FOR TLD:", tld);
+      }
     }
 
     res.json({
       domain,
       available: isAvailable,
       price,
+      years,
+      pricing_json,
     });
   } catch (err) {
-    console.log(err.response?.data || err.message);
+    console.log("❌ ERROR:", err.response?.data || err.message);
     res.status(500).json({ error: "Failed to check domain" });
   }
 };
