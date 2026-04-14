@@ -8,7 +8,14 @@ const Deployment = require("./Deployment");
 const Order = require("./Order");
 const Invoice = require("./Invoice");
 const InvoiceItem = require("./InvoiceItem");
+const ProductGroup = require("./ProductGroup");
+const Product = require("./Product");
 
+/*=================ADMIN PRODUCTS SETTINGS============*/
+ProductGroup.hasMany(Product, { foreignKey: "group_id" });
+Product.belongsTo(ProductGroup, { foreignKey: "group_id" });
+Product.hasOne(Plan, { foreignKey: "product_id" });
+Plan.belongsTo(Product, { foreignKey: "product_id" });
 /*==================INVOICE==================*/
 Invoice.hasMany(InvoiceItem, { foreignKey: "invoice_id" });
 InvoiceItem.belongsTo(Invoice, { foreignKey: "invoice_id" });

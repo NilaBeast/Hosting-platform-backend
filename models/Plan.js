@@ -29,6 +29,11 @@ const Plan = sequelize.define("Plan", {
   allowNull: true,
 },
 
+product_id: {
+  type: DataTypes.INTEGER,
+  allowNull: true,
+},
+
   price: DataTypes.FLOAT,
 });
 

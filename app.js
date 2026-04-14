@@ -1,3 +1,4 @@
+require("./models"); // 🔥 THIS IS MISSING
 require("./cron/packageSync.cron");
 require("./cron/domainPricing.cron"); // start cron
 const express = require("express");
@@ -43,6 +44,8 @@ app.use("/api/orders", require("./routes/order.routes"));
 app.use("/api/admin/billing", require("./routes/adminBilling.routes"));
 app.use("/api/admin/domain-pricing", require("./routes/adminDomain.routes"));
 app.use("/api/admin/settings", require("./routes/adminSettings.routes"));
+// app.js
+app.use("/api/admin/products", require("./routes/adminProduct.routes"));
 /* ===============================
    STATIC SITES
 ================================ */

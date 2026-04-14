@@ -1,12 +1,32 @@
 const Plan = require("../models/Plan");
 const { getWHMPackages } = require("../services/whmPackage.service");
 
-/* GET ALL PLANS */
-exports.getPlans = async (req, res) => {
-  const plans = await Plan.findAll();
-  res.json(plans);
-};
+const Product = require("../models/Product");
+const ProductGroup = require("../models/ProductGroup");
 
+exports.getPlans = async (req, res) => {
+  const plans = await Plan.findAll({
+    include: [
+      {
+        model: Product,
+        include: [
+          {
+            model: ProductGroup,
+            attributes: ["name"],
+          },
+        ],
+      },
+    ],
+  });
+
+  const formatted = plans.map((p) => ({
+    ...p.toJSON(),
+    product_name: p.Product?.name,
+    group_name: p.Product?.ProductGroup?.name,
+  }));
+
+  res.json(formatted);
+};
 /* SYNC WHM PACKAGES TO DB */
 exports.syncWHMPackages = async (req, res) => {
   try {

@@ -126,10 +126,32 @@ exports.createDomainOrder = async (req, res) => {
 ================================ */
 exports.createPaymentOrder = async (req, res) => {
   try {
-    const { planId, domain, config } = req.body;
+    console.log("🔥 PAYMENT HIT:", req.body);
 
-    const plan = await Plan.findByPk(planId);
-    if (!plan) return res.status(404).json("Plan not found");
+    let { planId, productId, domain, config } = req.body;
+
+    let plan = null;
+
+    /* ===============================
+       🔥 FIX: SUPPORT PRODUCT → PLAN
+    ============================== */
+    if (planId) {
+      plan = await Plan.findByPk(planId);
+    }
+
+    // 🔥 If plan not found, try productId
+    if (!plan && productId) {
+      plan = await Plan.findOne({
+        where: { product_id: productId },
+      });
+    }
+
+    if (!plan) {
+      console.log("❌ PLAN NOT FOUND:", { planId, productId });
+      return res.status(404).json("Plan not found");
+    }
+
+    console.log("✅ PLAN FOUND:", plan.id);
 
     /* ===============================
        DOMAIN PRICE
@@ -147,27 +169,24 @@ exports.createPaymentOrder = async (req, res) => {
     }
 
     /* ===============================
-       🔥 PLAN PRICE (DYNAMIC)
+       PLAN PRICE
     ============================== */
     let planPrice = 0;
 
     if (config?.price) {
       planPrice = Number(config.price);
     } else {
-      planPrice = Number(plan.price); // fallback
+      planPrice = Number(plan.price || 0);
     }
 
     /* ===============================
-       🔥 ADDONS
+       ADDONS
     ============================== */
     let addonPrice = 0;
 
     if (config?.dns) addonPrice += 50;
     if (config?.privacy) addonPrice += 100;
 
-    /* ===============================
-       🔥 FINAL TOTAL
-    ============================== */
     const total = planPrice + domainPrice + addonPrice;
 
     const orderId = "order_" + Date.now();
@@ -181,13 +200,11 @@ exports.createPaymentOrder = async (req, res) => {
         order_id: orderId,
         order_amount: total,
         order_currency: config?.currency || "INR",
-
         customer_details: {
           customer_id: req.user.id.toString(),
           customer_email: req.user.email,
           customer_phone: "9999999999",
         },
-
         order_meta: {
           return_url: `http://localhost:5173/plans?order_id=${orderId}`,
         },
@@ -210,7 +227,6 @@ exports.createPaymentOrder = async (req, res) => {
       domain,
       type: "hosting",
 
-      /* 🔥 STORE BREAKDOWN */
       plan_price: planPrice,
       domain_price: domainPrice,
       addon_price: addonPrice,
@@ -232,7 +248,7 @@ exports.createPaymentOrder = async (req, res) => {
     });
 
   } catch (err) {
-    console.log(err.response?.data || err.message);
+    console.log("❌ PAYMENT ERROR:", err.response?.data || err.message);
     res.status(500).json("Payment order failed");
   }
 };
