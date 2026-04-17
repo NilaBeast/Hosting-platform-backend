@@ -10,6 +10,14 @@ const Invoice = require("./Invoice");
 const InvoiceItem = require("./InvoiceItem");
 const ProductGroup = require("./ProductGroup");
 const Product = require("./Product");
+const Ticket = require("./Ticket");
+const TicketReply = require("./TicketReply");
+
+/*=============TICKET SYSTEM===============*/
+Ticket.belongsTo(User, { foreignKey: "user_id" });
+Ticket.hasMany(TicketReply, { foreignKey: "ticket_id" });
+
+TicketReply.belongsTo(Ticket, { foreignKey: "ticket_id" });
 
 /*=================ADMIN PRODUCTS SETTINGS============*/
 ProductGroup.hasMany(Product, { foreignKey: "group_id" });

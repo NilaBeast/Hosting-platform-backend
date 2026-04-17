@@ -29,13 +29,14 @@ app.use("/api/user", require("./routes/user.routes"));
 app.use("/api/hosting", require("./routes/hosting.routes"));
 app.use("/api/domain", require("./routes/domain.routes"));
 app.use("/api/deploy", require("./routes/deploy.routes"));
-// app.use("/api/github", require("./routes/github.routes"));
 app.use("/api/plans", require("./routes/plan.routes"));
 app.use("/api/profile", require("./routes/profile.routes"));
 app.use("/api/payment", require("./routes/payment.routes"));
 app.use("/invoices", express.static(path.join(__dirname, "../invoices")));
 app.use("/api/invoices", require("./routes/invoice.routes"));
 app.use("/api/domain-search", require("./routes/domainSearch.routes"));
+
+app.use("/api/tickets", require("./routes/ticket.routes"));
 /* ===============================
    ADMIN ROUTES (IMPORTANT)
 ================================ */
@@ -46,6 +47,14 @@ app.use("/api/admin/domain-pricing", require("./routes/adminDomain.routes"));
 app.use("/api/admin/settings", require("./routes/adminSettings.routes"));
 // app.js
 app.use("/api/admin/products", require("./routes/adminProduct.routes"));
+
+/* ===============================
+   UPLOADS STATIC (🔥 FIX)
+================================ */
+app.use(
+  "/uploads",
+  express.static(path.join(__dirname, "../uploads"))
+);
 /* ===============================
    STATIC SITES
 ================================ */

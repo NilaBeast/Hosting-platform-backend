@@ -321,7 +321,6 @@ exports.verifyPayment = async (req, res) => {
         status: "active",
       });
 
-      /* ===== CREATE INVOICE ===== */
       const invoiceNumber = "INV-" + Date.now();
 
       const invoice = await Invoice.create({
@@ -346,32 +345,42 @@ exports.verifyPayment = async (req, res) => {
         where: { invoice_id: invoice.id },
       });
 
-      /* ===== GENERATE PDF ===== */
       const pdfPath = await generateInvoicePDF(invoice, items);
-
-      console.log("PDF PATH:", pdfPath);
 
       if (!pdfPath) throw new Error("PDF generation failed");
 
-      /* ===== SAVE PDF PATH ===== */
       await Invoice.update(
         { pdf_path: pdfPath },
         { where: { id: invoice.id } }
       );
 
-      const updatedInvoice = await Invoice.findByPk(invoice.id);
-      console.log("SAVED PATH:", updatedInvoice.pdf_path);
-
-      /* ===== SEND MAIL ===== */
       await sendInvoiceMail(user.email, pdfPath);
 
       return res.json({ success: true });
     }
 
     /* =========================================================
-       🔥 HOSTING + DOMAIN FLOW
+       🔥 HOSTING + DOMAIN FLOW (FIXED)
     ========================================================= */
-    const plan = await Plan.findByPk(order.plan_id);
+
+    // 🔥 IMPORTANT FIX → include Product
+    const plan = await Plan.findByPk(order.plan_id, {
+      include: [
+        {
+          model: require("../models/Product"),
+          attributes: ["name"],
+        },
+      ],
+    });
+
+    if (!plan) {
+      console.log("❌ PLAN NOT FOUND:", order.plan_id);
+      return res.status(404).json("Plan not found");
+    }
+
+    // 🔥 USE PRODUCT NAME (NOT PLAN NAME)
+    const productName =
+      plan?.Product?.name || plan.name || "Hosting Plan";
 
     const username = order.domain.split(".")[0].substring(0, 8);
     const password = generateStrongPassword();
@@ -418,9 +427,10 @@ exports.verifyPayment = async (req, res) => {
       status: "paid",
     });
 
+    // 🔥 FIXED DESCRIPTION HERE
     await InvoiceItem.create({
       invoice_id: invoice.id,
-      description: `${plan.name} Hosting Plan`,
+      description: `${productName} Hosting Plan`,
       qty: 1,
       rate: order.plan_price,
       amount: order.plan_price,
@@ -438,23 +448,15 @@ exports.verifyPayment = async (req, res) => {
       where: { invoice_id: invoice.id },
     });
 
-    /* ===== GENERATE PDF ===== */
     const pdfPath = await generateInvoicePDF(invoice, items);
-
-    console.log("PDF PATH:", pdfPath);
 
     if (!pdfPath) throw new Error("PDF generation failed");
 
-    /* ===== SAVE PDF PATH ===== */
     await Invoice.update(
       { pdf_path: pdfPath },
       { where: { id: invoice.id } }
     );
 
-    const updatedInvoice = await Invoice.findByPk(invoice.id);
-    console.log("SAVED PATH:", updatedInvoice.pdf_path);
-
-    /* ===== SEND MAIL ===== */
     await sendInvoiceMail(user.email, pdfPath);
 
     res.json({ success: true });
