@@ -2,6 +2,13 @@ const Ticket = require("../models/Ticket");
 const TicketReply = require("../models/TicketReply");
 const User = require("../models/User");
 
+const transporter = require("../utils/mailer");
+const {
+  newTicketUser,
+  newTicketAdmin,
+  replyUser,
+} = require("../utils/ticketMail");
+
 /* ===============================
    GENERATE TICKET ID
 ================================ */
@@ -10,7 +17,7 @@ function generateTicketId() {
 }
 
 /* ===============================
-   CREATE TICKET (FIXED 🔥)
+   CREATE TICKET
 ================================ */
 exports.createTicket = async (req, res) => {
   try {
@@ -23,16 +30,11 @@ exports.createTicket = async (req, res) => {
       cc_recipients,
     } = req.body;
 
-    /* ===============================
-       VALIDATION
-    ============================== */
     if (!subject || !message) {
       return res.status(400).json("Subject & message required");
     }
 
-    /* ===============================
-       RESOLVE USER
-    ============================== */
+    /* USER RESOLVE */
     let finalUser = null;
 
     if (req.user.role === "admin" && user_id) {
@@ -47,31 +49,24 @@ exports.createTicket = async (req, res) => {
       return res.status(400).json("User not found");
     }
 
-    /* ===============================
-       PRIORITY FIX 🔥
-    ============================== */
+    /* PRIORITY FIX */
     const validPriorities = ["Low", "Medium", "High"];
-
     const finalPriority = validPriorities.includes(priority)
       ? priority
       : "Medium";
 
-    /* ===============================
-       FILES
-    ============================== */
+    /* FILES */
     const files = req.files || [];
-    const attachments = files.map((f) =>
-  `uploads/tickets/${f.filename}`
-); // 🔥 Cloudinary URL
+    const attachments = files.map(
+      (f) => `uploads/tickets/${f.filename}`
+    );
 
-    /* ===============================
-       CREATE TICKET
-    ============================== */
+    /* CREATE */
     const ticket = await Ticket.create({
       ticket_id: generateTicketId(),
       subject,
       department: department || "General Enquiries",
-      priority: finalPriority, // ✅ FIXED
+      priority: finalPriority,
 
       user_id: finalUser.id,
       admin_id: req.user.role === "admin" ? req.user.id : null,
@@ -92,6 +87,29 @@ exports.createTicket = async (req, res) => {
       attachments: JSON.stringify(attachments),
     });
 
+    /* ===============================
+       SEND EMAILS 🔥
+    ============================== */
+    try {
+      // USER EMAIL
+      await transporter.sendMail({
+        from: process.env.MAIL_USER,
+        to: finalUser.email,
+        subject: `Ticket Created - ${ticket.ticket_id}`,
+        html: newTicketUser(ticket),
+      });
+
+      // ADMIN EMAIL
+      await transporter.sendMail({
+        from: process.env.MAIL_USER,
+        to: process.env.ADMIN_EMAIL,
+        subject: `New Ticket - ${ticket.ticket_id}`,
+        html: newTicketAdmin(ticket, message),
+      });
+    } catch (mailErr) {
+      console.error("MAIL ERROR:", mailErr.message);
+    }
+
     res.json(ticket);
   } catch (err) {
     console.error("CREATE TICKET ERROR:", err);
@@ -103,73 +121,44 @@ exports.createTicket = async (req, res) => {
    GET ALL TICKETS (ADMIN)
 ================================ */
 exports.getAllTickets = async (req, res) => {
-  try {
-    const tickets = await Ticket.findAll({
-      include: [
-        {
-          model: User,
-          attributes: ["id", "name", "email"],
-        },
-      ],
-      order: [["createdAt", "DESC"]],
-    });
+  const tickets = await Ticket.findAll({
+    include: [{ model: User, attributes: ["id", "name", "email"] }],
+    order: [["createdAt", "DESC"]],
+  });
 
-    res.json(tickets);
-  } catch (err) {
-    console.error("GET ALL TICKETS ERROR:", err);
-    res.status(500).json("Error fetching tickets");
-  }
+  res.json(tickets);
 };
 
 /* ===============================
    GET USER TICKETS
 ================================ */
 exports.getMyTickets = async (req, res) => {
-  try {
-    const tickets = await Ticket.findAll({
-      where: { user_id: req.user.id },
-      order: [["createdAt", "DESC"]],
-    });
+  const tickets = await Ticket.findAll({
+    where: { user_id: req.user.id },
+    order: [["createdAt", "DESC"]],
+  });
 
-    res.json(tickets);
-  } catch (err) {
-    console.error("GET MY TICKETS ERROR:", err);
-    res.status(500).json("Error fetching tickets");
-  }
+  res.json(tickets);
 };
 
 /* ===============================
-   GET SINGLE TICKET
+   GET SINGLE
 ================================ */
 exports.getTicketById = async (req, res) => {
-  try {
-    const ticket = await Ticket.findByPk(req.params.id, {
-      include: [
-        {
-          model: TicketReply,
-          separate: true,
-          order: [["createdAt", "ASC"]],
-        },
-        {
-          model: User,
-          attributes: ["id", "name", "email"],
-        },
-      ],
-    });
+  const ticket = await Ticket.findByPk(req.params.id, {
+    include: [
+      { model: TicketReply, separate: true, order: [["createdAt", "ASC"]] },
+      { model: User, attributes: ["id", "name", "email"] },
+    ],
+  });
 
-    if (!ticket) {
-      return res.status(404).json("Ticket not found");
-    }
+  if (!ticket) return res.status(404).json("Ticket not found");
 
-    res.json(ticket);
-  } catch (err) {
-    console.error("GET TICKET ERROR:", err);
-    res.status(500).json("Error fetching ticket");
-  }
+  res.json(ticket);
 };
 
 /* ===============================
-   REPLY (FIX EMPTY MESSAGE 🔥)
+   REPLY
 ================================ */
 exports.replyTicket = async (req, res) => {
   try {
@@ -180,9 +169,9 @@ exports.replyTicket = async (req, res) => {
     }
 
     const files = req.files || [];
-    const attachments = files.map((f) =>
-  `uploads/tickets/${f.filename}`
-); // 🔥 Cloudinary URL
+    const attachments = files.map(
+      (f) => `uploads/tickets/${f.filename}`
+    );
 
     const reply = await TicketReply.create({
       ticket_id: req.params.id,
@@ -198,6 +187,24 @@ exports.replyTicket = async (req, res) => {
       { where: { id: req.params.id } }
     );
 
+    /* ===============================
+       EMAIL ON ADMIN REPLY 🔥
+    ============================== */
+    try {
+      if (req.user.role === "admin") {
+        const ticket = await Ticket.findByPk(req.params.id);
+
+        await transporter.sendMail({
+          from: process.env.MAIL_USER,
+          to: ticket.client_email,
+          subject: `New Reply - ${ticket.ticket_id}`,
+          html: replyUser(ticket, message),
+        });
+      }
+    } catch (mailErr) {
+      console.error("MAIL ERROR:", mailErr.message);
+    }
+
     res.json(reply);
   } catch (err) {
     console.error("REPLY ERROR:", err);
@@ -206,18 +213,13 @@ exports.replyTicket = async (req, res) => {
 };
 
 /* ===============================
-   CLOSE TICKET
+   CLOSE
 ================================ */
 exports.closeTicket = async (req, res) => {
-  try {
-    await Ticket.update(
-      { status: "Closed" },
-      { where: { id: req.params.id } }
-    );
+  await Ticket.update(
+    { status: "Closed" },
+    { where: { id: req.params.id } }
+  );
 
-    res.json({ message: "Ticket Closed" });
-  } catch (err) {
-    console.error("CLOSE ERROR:", err);
-    res.status(500).json("Error closing ticket");
-  }
+  res.json({ message: "Ticket Closed" });
 };
