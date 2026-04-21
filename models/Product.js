@@ -37,6 +37,11 @@ free_domain_tlds: {
   allowNull: true,
 },
 
+product_group_id: {
+  type: DataTypes.INTEGER,
+  allowNull: false,
+},
+
   is_hidden: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,

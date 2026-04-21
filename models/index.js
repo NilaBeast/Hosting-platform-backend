@@ -24,6 +24,10 @@ ProductGroup.hasMany(Product, { foreignKey: "group_id" });
 Product.belongsTo(ProductGroup, { foreignKey: "group_id" });
 Product.hasOne(Plan, { foreignKey: "product_id" });
 Plan.belongsTo(Product, { foreignKey: "product_id" });
+
+Product.belongsTo(ProductGroup, { foreignKey: "product_group_id" });
+ProductGroup.hasMany(Product, { foreignKey: "product_group_id" });
+Product.hasMany(Plan, { foreignKey: "product_id" });
 /*==================INVOICE==================*/
 Invoice.hasMany(InvoiceItem, { foreignKey: "invoice_id" });
 InvoiceItem.belongsTo(Invoice, { foreignKey: "invoice_id" });

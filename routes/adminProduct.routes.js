@@ -11,6 +11,9 @@ router.get("/groups",  controller.getGroups);
 router.put("/group/:id", auth, admin, controller.updateGroup);
 router.delete("/group/:id", auth, admin, controller.deleteGroup);
 
+router.get("/group/:groupId/products", controller.getProductsByGroup);
+router.get("/product/:productId/plans", controller.getPlansByProduct);
+
 /* PRODUCTS */
 router.post("/product", auth, admin, controller.createProduct);
 router.get("/products", auth, admin, controller.getProducts);

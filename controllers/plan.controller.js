@@ -12,17 +12,25 @@ exports.getPlans = async (req, res) => {
         include: [
           {
             model: ProductGroup,
-            attributes: ["name"],
+            attributes: ["id", "name"],
           },
         ],
+        attributes: ["id", "name"],
       },
     ],
   });
 
   const formatted = plans.map((p) => ({
-    ...p.toJSON(),
+    id: p.id,
+    name: p.name,
+    price: p.price,
+
     product_name: p.Product?.name,
     group_name: p.Product?.ProductGroup?.name,
+
+    display_name: `${p.Product?.ProductGroup?.name || "No Group"} → ${
+      p.Product?.name || "No Product"
+    } → ${p.name}`,
   }));
 
   res.json(formatted);

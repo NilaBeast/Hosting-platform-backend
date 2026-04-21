@@ -45,6 +45,7 @@ app.use("/api/orders", require("./routes/order.routes"));
 app.use("/api/admin/billing", require("./routes/adminBilling.routes"));
 app.use("/api/admin/domain-pricing", require("./routes/adminDomain.routes"));
 app.use("/api/admin/settings", require("./routes/adminSettings.routes"));
+app.use("/api/admin/accounts", require("./routes/adminAccounts.routes"));
 // app.js
 app.use("/api/admin/products", require("./routes/adminProduct.routes"));
 
