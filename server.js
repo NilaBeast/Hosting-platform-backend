@@ -10,7 +10,7 @@ async function startServer() {
     console.log("✅ MySQL Connected");
 
     console.log("⏳ Syncing tables...");
-    await sequelize.sync(); // ✅ ONLY THIS
+    await sequelize.sync({alter: true}); // ✅ ONLY THIS
     console.log("✅ All Tables Synced");
 
     app.listen(process.env.PORT || 5000, () => {

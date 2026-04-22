@@ -1,14 +1,12 @@
-const axios = require("axios");
 const Order = require("../models/Order");
 const Plan = require("../models/Plan");
 const User = require("../models/User");
 const DomainPricing = require("../models/DomainPricing");
 
 const Product = require("../models/Product"); // 🔥 ADD THIS
-const BASE = "https://test.techzuno.com";
-
+const { handleOrderSuccess } = require("../services/orderSuccess.service");
 /* ===============================
-   CREATE ORDER (ADMIN → PAYMENT)
+   CREATE ORDER (ADMIN)
 ================================ */
 exports.createOrder = async (req, res) => {
   try {
@@ -21,9 +19,21 @@ exports.createOrder = async (req, res) => {
       return res.status(400).json("Invalid user or product");
     }
 
-    /* ===============================
-       DOMAIN PRICE
-    ============================== */
+    const plan =
+      (await Plan.findOne({ where: { product_id: product.id } })) ||
+      (product.whm_package_name
+        ? await Plan.findOne({
+            where: { whm_package_name: product.whm_package_name },
+          })
+        : null);
+
+    if (!plan) {
+      return res
+        .status(400)
+        .json("No hosting plan linked to this product");
+    }
+
+    /* ================= DOMAIN PRICE ================= */
     let domainPrice = 0;
 
     if (domain) {
@@ -38,87 +48,54 @@ exports.createOrder = async (req, res) => {
         Number(pricing?.register_margin || 0);
     }
 
-   /* ===============================
-   🔥 PRODUCT PRICE (FIXED)
-============================== */
-let productPrice = 0;
+    /* ================= PRODUCT PRICE ================= */
+    let productPrice = 0;
 
-if (product.pricing_json && billing_cycle) {
-  let pricing = {};
+    if (product.pricing_json && billing_cycle) {
+      let pricing = {};
 
-  try {
-    pricing =
-      typeof product.pricing_json === "string"
-        ? JSON.parse(product.pricing_json)
-        : product.pricing_json;
-  } catch {
-    pricing = {};
-  }
+      try {
+        pricing =
+          typeof product.pricing_json === "string"
+            ? JSON.parse(product.pricing_json)
+            : product.pricing_json;
+      } catch {
+        pricing = {};
+      }
 
-  productPrice = Number(
-    pricing?.INR?.[billing_cycle]?.price || 0
-  );
-} else {
-  productPrice = Number(product.price || 0);
-}
+      productPrice = Number(
+        pricing?.INR?.[billing_cycle]?.price || 0
+      );
+    } else {
+      productPrice = Number(product.price || 0);
+    }
 
-    /* ===============================
-       TOTAL
-    ============================== */
     const total = productPrice + domainPrice;
 
-    const orderId = "order_" + Date.now();
-
-    /* ===============================
-       CASHFREE ORDER
-    ============================== */
-    const response = await axios.post(
-      `${process.env.CASHFREE_BASE_URL}/orders`,
-      {
-        order_id: orderId,
-        order_amount: total,
-        order_currency: "INR",
-        customer_details: {
-          customer_id: user.id.toString(),
-          customer_email: user.email,
-          customer_phone: "9999999999",
-        },
-        order_meta: {
-          return_url: `http://localhost:5173/admin/orders?order_id=${orderId}`,
-        },
-      },
-      {
-        headers: {
-          "x-client-id": process.env.CASHFREE_APP_ID,
-          "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-          "x-api-version": "2022-09-01",
-        },
-      }
-    );
-
-    /* ===============================
-       SAVE ORDER
-    ============================== */
-    await Order.create({
+    const order = await Order.create({
       user_id,
-      product_id,
+      plan_id: plan.id,
       domain,
-
-      billing_cycle: billing_cycle || null, // ✅ NEW
-
-      product_price: productPrice,
+      plan_price: productPrice,
       domain_price: domainPrice,
       total_price: total,
-
-      cashfree_order_id: orderId,
-      payment_session_id: response.data.payment_session_id,
-
-      status: "pending",
-      domain_status: "pending",
+      cashfree_order_id: null,
+      payment_session_id: null,
+      status: "paid",
+      domain_status: "active",
       type: "hosting",
     });
 
-    res.json(response.data);
+    await handleOrderSuccess(order, {
+      billing_cycle: billing_cycle || null,
+    });
+
+    return res.json({
+      success: true,
+      message: "Admin order created successfully",
+      order,
+    });
+
   } catch (err) {
     console.log("CREATE ORDER ERROR:", err.response?.data || err.message);
     res.status(500).json("Order creation failed");
