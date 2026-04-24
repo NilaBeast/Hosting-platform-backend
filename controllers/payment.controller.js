@@ -354,7 +354,7 @@ exports.verifyPayment = async (req, res) => {
         { where: { id: invoice.id } }
       );
 
-      await sendInvoiceMail(user.email, pdfPath);
+      await sendInvoiceMail(user.id, user.email, pdfPath);
 
       return res.json({ success: true });
     }
@@ -457,7 +457,7 @@ exports.verifyPayment = async (req, res) => {
       { where: { id: invoice.id } }
     );
 
-    await sendInvoiceMail(user.email, pdfPath);
+    await sendInvoiceMail(user.id, user.email, pdfPath);
 
     res.json({ success: true });
 

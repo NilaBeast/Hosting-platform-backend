@@ -61,6 +61,10 @@ router.put("/users/:id", auth, admin, async (req, res) => {
   }
 });
 
+router.get("/users/:id", auth, admin, adminController.getUserDetails);
+
+router.put("/users/:id/details", auth, admin, adminController.updateUserDetails);
+
 /* DASHBOARD */
 router.get("/dashboard", auth, admin, adminController.getDashboardStats);
 

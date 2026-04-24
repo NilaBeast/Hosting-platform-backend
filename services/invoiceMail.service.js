@@ -1,5 +1,6 @@
 const nodemailer = require("nodemailer");
 const path = require("path");
+const EmailLog = require("../models/EmailLog");
 
 /* ===============================
    MAIL TRANSPORTER (GMAIL)
@@ -15,7 +16,7 @@ const transporter = nodemailer.createTransport({
 /* ===============================
    SEND INVOICE MAIL
 ================================ */
-exports.sendInvoiceMail = async (toEmail, pdfPath) => {
+exports.sendInvoiceMail = async (userId, toEmail, pdfPath) => {
   try {
     // Convert relative path to absolute path
     const absolutePath = path.join(
@@ -24,7 +25,7 @@ exports.sendInvoiceMail = async (toEmail, pdfPath) => {
       pdfPath
     );
 
-    await transporter.sendMail({
+    const mailOptions = {
       from: `"Techzuno Billing" <${process.env.MAIL_USER}>`,
       to: toEmail,
       subject: "Invoice - Techzuno Hosting",
@@ -50,10 +51,50 @@ exports.sendInvoiceMail = async (toEmail, pdfPath) => {
           path: absolutePath,
         },
       ],
-    });
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+
+    try {
+      await EmailLog.create({
+        user_id: userId || null,
+        direction: "outgoing",
+        source: "platform",
+        from_email: process.env.MAIL_USER || null,
+        to_email: toEmail,
+        subject: mailOptions.subject || null,
+        body_html: mailOptions.html || null,
+        body_text: null,
+        status: "sent",
+        provider_message_id: info?.messageId || null,
+        meta_json: JSON.stringify({
+          type: "invoice",
+          hasAttachment: true,
+          attachment: path.basename(pdfPath),
+        }),
+      });
+    } catch (e) {
+      console.log("EMAIL LOG ERROR:", e?.message || e);
+    }
 
     console.log("Invoice mail sent to:", toEmail);
   } catch (err) {
+    try {
+      await EmailLog.create({
+        user_id: userId || null,
+        direction: "outgoing",
+        source: "platform",
+        from_email: process.env.MAIL_USER || null,
+        to_email: toEmail,
+        subject: "Invoice - Techzuno Hosting",
+        body_html: null,
+        body_text: null,
+        status: "failed",
+        error_message: err?.message || String(err),
+      });
+    } catch (e) {
+      console.log("EMAIL LOG ERROR:", e?.message || e);
+    }
     console.log("MAIL ERROR:", err);
   }
 };

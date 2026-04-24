@@ -1,6 +1,7 @@
 const Ticket = require("../models/Ticket");
 const TicketReply = require("../models/TicketReply");
 const User = require("../models/User");
+const EmailLog = require("../models/EmailLog");
 
 const transporter = require("../utils/mailer");
 const {
@@ -87,19 +88,54 @@ exports.createTicket = async (req, res) => {
       attachments: JSON.stringify(attachments),
     });
 
-    /* ===============================
-       SEND EMAILS 🔥
-    ============================== */
-    try {
-      // USER EMAIL
-      await transporter.sendMail({
-        from: process.env.MAIL_USER,
-        to: finalUser.email,
-        subject: `Ticket Created - ${ticket.ticket_id}`,
-        html: newTicketUser(ticket),
-      });
+    const userMail = {
+      from: process.env.MAIL_USER,
+      to: finalUser.email,
+      subject: `Ticket Created - ${ticket.ticket_id}`,
+      html: newTicketUser(ticket),
+    };
 
-      // ADMIN EMAIL
+    try {
+      const info = await transporter.sendMail(userMail);
+      try {
+        await EmailLog.create({
+          user_id: finalUser.id,
+          direction: "outgoing",
+          source: "platform",
+          from_email: process.env.MAIL_USER || null,
+          to_email: finalUser.email,
+          subject: userMail.subject || null,
+          body_html: userMail.html || null,
+          body_text: null,
+          status: "sent",
+          provider_message_id: info?.messageId || null,
+          meta_json: JSON.stringify({ type: "ticket_created", ticket_id: ticket.ticket_id }),
+        });
+      } catch (e) {
+        console.log("EMAIL LOG ERROR:", e?.message || e);
+      }
+    } catch (mailErr) {
+      try {
+        await EmailLog.create({
+          user_id: finalUser.id,
+          direction: "outgoing",
+          source: "platform",
+          from_email: process.env.MAIL_USER || null,
+          to_email: finalUser.email,
+          subject: userMail.subject || null,
+          body_html: userMail.html || null,
+          body_text: null,
+          status: "failed",
+          error_message: mailErr?.message || String(mailErr),
+          meta_json: JSON.stringify({ type: "ticket_created", ticket_id: ticket.ticket_id }),
+        });
+      } catch (e) {
+        console.log("EMAIL LOG ERROR:", e?.message || e);
+      }
+      console.error("MAIL ERROR:", mailErr.message);
+    }
+
+    try {
       await transporter.sendMail({
         from: process.env.MAIL_USER,
         to: process.env.ADMIN_EMAIL,
@@ -187,22 +223,55 @@ exports.replyTicket = async (req, res) => {
       { where: { id: req.params.id } }
     );
 
-    /* ===============================
-       EMAIL ON ADMIN REPLY 🔥
-    ============================== */
-    try {
-      if (req.user.role === "admin") {
-        const ticket = await Ticket.findByPk(req.params.id);
+    if (req.user.role === "admin") {
+      const ticket = await Ticket.findByPk(req.params.id);
 
-        await transporter.sendMail({
-          from: process.env.MAIL_USER,
-          to: ticket.client_email,
-          subject: `New Reply - ${ticket.ticket_id}`,
-          html: replyUser(ticket, message),
-        });
+      const replyMail = {
+        from: process.env.MAIL_USER,
+        to: ticket.client_email,
+        subject: `New Reply - ${ticket.ticket_id}`,
+        html: replyUser(ticket, message),
+      };
+
+      try {
+        const info = await transporter.sendMail(replyMail);
+        try {
+          await EmailLog.create({
+            user_id: ticket.user_id || null,
+            direction: "outgoing",
+            source: "platform",
+            from_email: process.env.MAIL_USER || null,
+            to_email: ticket.client_email,
+            subject: replyMail.subject || null,
+            body_html: replyMail.html || null,
+            body_text: null,
+            status: "sent",
+            provider_message_id: info?.messageId || null,
+            meta_json: JSON.stringify({ type: "ticket_reply", ticket_id: ticket.ticket_id }),
+          });
+        } catch (e) {
+          console.log("EMAIL LOG ERROR:", e?.message || e);
+        }
+      } catch (mailErr) {
+        try {
+          await EmailLog.create({
+            user_id: ticket.user_id || null,
+            direction: "outgoing",
+            source: "platform",
+            from_email: process.env.MAIL_USER || null,
+            to_email: ticket.client_email,
+            subject: replyMail.subject || null,
+            body_html: replyMail.html || null,
+            body_text: null,
+            status: "failed",
+            error_message: mailErr?.message || String(mailErr),
+            meta_json: JSON.stringify({ type: "ticket_reply", ticket_id: ticket.ticket_id }),
+          });
+        } catch (e) {
+          console.log("EMAIL LOG ERROR:", e?.message || e);
+        }
+        console.error("MAIL ERROR:", mailErr.message);
       }
-    } catch (mailErr) {
-      console.error("MAIL ERROR:", mailErr.message);
     }
 
     res.json(reply);

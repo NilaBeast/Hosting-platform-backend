@@ -89,7 +89,7 @@ exports.createInvoice = async (req, res) => {
     console.log("STEP 5: SAVED VALUE =", updatedInvoice.pdf_path);
 
     // SEND MAIL
-    await sendInvoiceMail(updatedInvoice.email, pdfPath);
+    await sendInvoiceMail(updatedInvoice.user_id, updatedInvoice.email, pdfPath);
 
     res.json({
       message: "Invoice created",
@@ -128,7 +128,7 @@ exports.downloadInvoice = async (req, res) => {
 exports.sendInvoiceMailAgain = async (req, res) => {
   const invoice = await Invoice.findByPk(req.params.id);
 
-  await sendInvoiceMail(invoice.email, invoice.pdf_path);
+  await sendInvoiceMail(invoice.user_id, invoice.email, invoice.pdf_path);
 
   res.json({ message: "Invoice mail sent again" });
 };

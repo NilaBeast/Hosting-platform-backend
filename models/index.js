@@ -13,6 +13,8 @@ const Product = require("./Product");
 const DomainPricing = require("./DomainPricing");
 const Ticket = require("./Ticket");
 const TicketReply = require("./TicketReply");
+const UserAdminProfile = require("./UserAdminProfile");
+const EmailLog = require("./EmailLog");
 
 /*=============TICKET SYSTEM===============*/
 Ticket.belongsTo(User, { foreignKey: "user_id" });
@@ -60,9 +62,17 @@ Domain.belongsTo(User, { foreignKey: "user_id" });
 User.hasMany(Deployment, { foreignKey: "user_id" });
 Deployment.belongsTo(User, { foreignKey: "user_id" });
 
+User.hasOne(UserAdminProfile, { foreignKey: "user_id" });
+UserAdminProfile.belongsTo(User, { foreignKey: "user_id" });
+
+User.hasMany(EmailLog, { foreignKey: "user_id" });
+EmailLog.belongsTo(User, { foreignKey: "user_id" });
+
 module.exports = {
   sequelize,
   User,
+  UserAdminProfile,
+  EmailLog,
   Plan,
   HostingAccount,
   Domain,

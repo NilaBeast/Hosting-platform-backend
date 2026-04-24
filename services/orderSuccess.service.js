@@ -213,7 +213,7 @@ exports.handleOrderSuccess = async (order, meta = {}) => {
     /* ===============================
        SEND EMAIL
     ============================== */
-    await sendInvoiceMail(user.email, pdfPath);
+    await sendInvoiceMail(user.id, user.email, pdfPath);
 
     console.log("📩 Email sent");
 
