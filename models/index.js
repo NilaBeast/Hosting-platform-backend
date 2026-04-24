@@ -10,6 +10,7 @@ const Invoice = require("./Invoice");
 const InvoiceItem = require("./InvoiceItem");
 const ProductGroup = require("./ProductGroup");
 const Product = require("./Product");
+const DomainPricing = require("./DomainPricing");
 const Ticket = require("./Ticket");
 const TicketReply = require("./TicketReply");
 
@@ -65,6 +66,7 @@ module.exports = {
   Plan,
   HostingAccount,
   Domain,
+  DomainPricing,
   Deployment,
   Order,
 };

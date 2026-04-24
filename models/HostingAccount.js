@@ -10,6 +10,9 @@ const HostingAccount = sequelize.define("HostingAccount", {
   domain: DataTypes.STRING,
   email: DataTypes.STRING,
   password: DataTypes.STRING,
+  service_name: DataTypes.STRING,
+  billing_cycle: DataTypes.STRING,
+  next_due_date: DataTypes.DATE,
   status: DataTypes.STRING,
    login_url: DataTypes.TEXT,
 });

@@ -5,6 +5,11 @@ const Domain = sequelize.define("Domain", {
   user_id: DataTypes.INTEGER,
   domain: DataTypes.STRING,
   cpanel_username: DataTypes.STRING,
+  registration_date: DataTypes.DATE,
+  expiry_date: DataTypes.DATE,
+  next_due_date: DataTypes.DATE,
+  recurring_amount: DataTypes.FLOAT,
+  registration_period: DataTypes.INTEGER,
 
   is_primary: {
     type: DataTypes.BOOLEAN,
