@@ -20,8 +20,13 @@ const Order = sequelize.define("Order", {
     defaultValue: "pending", // pending / registered
   },
 
+  payment_gateway: DataTypes.STRING,
+
   cashfree_order_id: DataTypes.STRING,
   payment_session_id: DataTypes.STRING,
+  razorpay_order_id: DataTypes.STRING,
+  razorpay_payment_id: DataTypes.STRING,
+  razorpay_signature: DataTypes.STRING,
 type: DataTypes.STRING, // 🔥 ADD THIS
   payment_id: DataTypes.STRING,
   payment_method: DataTypes.STRING,

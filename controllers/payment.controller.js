@@ -1,4 +1,5 @@
 const axios = require("axios");
+const crypto = require("crypto");
 const Order = require("../models/Order");
 const Plan = require("../models/Plan");
 const User = require("../models/User");
@@ -21,6 +22,56 @@ function generateStrongPassword() {
   return Array.from({ length: 14 }, () =>
     chars[Math.floor(Math.random() * chars.length)]
   ).join("");
+}
+
+function getRazorpayAuth() {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keyId || !keySecret) {
+    const err = new Error("Razorpay keys missing");
+    err.statusCode = 500;
+    throw err;
+  }
+  return { keyId, keySecret };
+}
+
+async function createRazorpayOrder({ amountInInr, currency, receipt, notes }) {
+  const { keyId, keySecret } = getRazorpayAuth();
+  if ((currency || "INR") !== "INR") {
+    const err = new Error("Razorpay supports INR only");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const amount = Math.max(0, Math.round(Number(amountInInr || 0) * 100));
+  if (!amount) {
+    const err = new Error("Invalid amount");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const response = await axios.post(
+    "https://api.razorpay.com/v1/orders",
+    {
+      amount,
+      currency: "INR",
+      receipt: receipt || `rcpt_${Date.now()}`,
+      notes: notes || {},
+    },
+    {
+      auth: {
+        username: keyId,
+        password: keySecret,
+      },
+    }
+  );
+
+  return {
+    keyId,
+    razorpayOrderId: response.data.id,
+    amount: response.data.amount,
+    currency: response.data.currency,
+  };
 }
 
 /* ===============================
@@ -65,31 +116,16 @@ exports.createDomainOrder = async (req, res) => {
       total += pricing.register_margin * years;
     }
 
-    const orderId = "order_" + Date.now();
-
-    const response = await axios.post(
-      `${process.env.CASHFREE_BASE_URL}/orders`,
-      {
-        order_id: orderId,
-        order_amount: total,
-        order_currency: "INR",
-        customer_details: {
-          customer_id: req.user.id.toString(),
-          customer_email: req.user.email,
-          customer_phone: "9999999999",
-        },
-        order_meta: {
-          return_url: `http://localhost:5173/domains?order_id=${orderId}`,
-        },
+    const rpOrder = await createRazorpayOrder({
+      amountInInr: total,
+      currency: "INR",
+      receipt: `domain_${req.user.id}_${Date.now()}`,
+      notes: {
+        user_id: String(req.user.id),
+        type: "domain",
+        domain,
       },
-      {
-        headers: {
-          "x-client-id": process.env.CASHFREE_APP_ID,
-          "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-          "x-api-version": "2022-09-01",
-        },
-      }
-    );
+    });
 
     await Order.create({
       user_id: req.user.id,
@@ -99,25 +135,26 @@ exports.createDomainOrder = async (req, res) => {
       domain_price: basePrice,
       total_price: total,
 
-      years,
-      tld,
-
-      cashfree_order_id: orderId,
-      payment_session_id: response.data.payment_session_id,
+      payment_gateway: "razorpay",
+      razorpay_order_id: rpOrder.razorpayOrderId,
+      cashfree_order_id: null,
+      payment_session_id: null,
 
       status: "pending",
       domain_status: "pending",
     });
 
     res.json({
-      payment_session_id: response.data.payment_session_id,
-      order_id: orderId,
-      amount: total,
+      razorpay_key_id: rpOrder.keyId,
+      razorpay_order_id: rpOrder.razorpayOrderId,
+      amount: rpOrder.amount,
+      currency: rpOrder.currency,
     });
 
   } catch (err) {
+    const status = err.statusCode || 500;
     console.log(err.response?.data || err.message);
-    res.status(500).json("Domain order failed");
+    res.status(status).json(err.message || "Domain order failed");
   }
 };
 
@@ -189,34 +226,17 @@ exports.createPaymentOrder = async (req, res) => {
 
     const total = planPrice + domainPrice + addonPrice;
 
-    const orderId = "order_" + Date.now();
-
-    /* ===============================
-       CASHFREE ORDER
-    ============================== */
-    const response = await axios.post(
-      `${process.env.CASHFREE_BASE_URL}/orders`,
-      {
-        order_id: orderId,
-        order_amount: total,
-        order_currency: config?.currency || "INR",
-        customer_details: {
-          customer_id: req.user.id.toString(),
-          customer_email: req.user.email,
-          customer_phone: "9999999999",
-        },
-        order_meta: {
-          return_url: `http://localhost:5173/plans?order_id=${orderId}`,
-        },
+    const rpOrder = await createRazorpayOrder({
+      amountInInr: total,
+      currency: config?.currency || "INR",
+      receipt: `hosting_${req.user.id}_${Date.now()}`,
+      notes: {
+        user_id: String(req.user.id),
+        type: "hosting",
+        plan_id: String(plan.id),
+        domain: domain || "",
       },
-      {
-        headers: {
-          "x-client-id": process.env.CASHFREE_APP_ID,
-          "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-          "x-api-version": "2022-09-01",
-        },
-      }
-    );
+    });
 
     /* ===============================
        SAVE ORDER
@@ -229,27 +249,28 @@ exports.createPaymentOrder = async (req, res) => {
 
       plan_price: planPrice,
       domain_price: domainPrice,
-      addon_price: addonPrice,
       total_price: total,
 
-      billing_cycle: config?.cycle || "monthly",
-      currency: config?.currency || "INR",
-
-      cashfree_order_id: orderId,
-      payment_session_id: response.data.payment_session_id,
+      payment_gateway: "razorpay",
+      razorpay_order_id: rpOrder.razorpayOrderId,
+      cashfree_order_id: null,
+      payment_session_id: null,
 
       status: "pending",
       domain_status: "pending",
     });
 
     res.json({
-      payment_session_id: response.data.payment_session_id,
-      order_id: orderId,
+      razorpay_key_id: rpOrder.keyId,
+      razorpay_order_id: rpOrder.razorpayOrderId,
+      amount: rpOrder.amount,
+      currency: rpOrder.currency,
     });
 
   } catch (err) {
+    const status = err.statusCode || 500;
     console.log("❌ PAYMENT ERROR:", err.response?.data || err.message);
-    res.status(500).json("Payment order failed");
+    res.status(status).json(err.message || "Payment order failed");
   }
 };
 
@@ -261,42 +282,46 @@ exports.createPaymentOrder = async (req, res) => {
 ================================ */
 exports.verifyPayment = async (req, res) => {
   try {
-    const { orderId } = req.body;
+    const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature } =
+      req.body || {};
 
-    /* ===============================
-       VERIFY FROM CASHFREE
-    ============================== */
-    const response = await axios.get(
-      `${process.env.CASHFREE_BASE_URL}/orders/${orderId}`,
-      {
-        headers: {
-          "x-client-id": process.env.CASHFREE_APP_ID,
-          "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-          "x-api-version": "2022-09-01",
-        },
-      }
-    );
+    const isRazorpay = !!(razorpay_order_id && razorpay_payment_id && razorpay_signature);
 
-    const order = await Order.findOne({
-      where: { cashfree_order_id: orderId },
-    });
+    const order = isRazorpay
+      ? await Order.findOne({ where: { razorpay_order_id } })
+      : await Order.findOne({ where: { cashfree_order_id: orderId } });
 
     if (!order) return res.status(404).json("Order not found");
 
-    const status = response.data.order_status;
-
-    if (status === "ACTIVE") {
-      return res.json({ pending: true });
+    if (order.status === "active") {
+      return res.json({ success: true });
     }
 
-    if (status === "FAILED" || status === "EXPIRED") {
-      order.status = "failed";
-      await order.save();
-      return res.json({ success: false });
-    }
+    if (isRazorpay) {
+      const { keySecret } = getRazorpayAuth();
+      const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
+      const expected = crypto
+        .createHmac("sha256", keySecret)
+        .update(payload)
+        .digest("hex");
 
-    if (status !== "PAID") {
-      return res.json({ pending: true });
+      if (expected !== razorpay_signature) {
+        order.status = "failed";
+        order.payment_status = "failed";
+        order.payment_gateway = "razorpay";
+        order.razorpay_payment_id = razorpay_payment_id;
+        order.razorpay_signature = razorpay_signature;
+        await order.save();
+        return res.status(400).json({ success: false });
+      }
+
+      order.payment_gateway = "razorpay";
+      order.payment_method = "razorpay";
+      order.payment_id = razorpay_payment_id;
+      order.razorpay_payment_id = razorpay_payment_id;
+      order.razorpay_signature = razorpay_signature;
+    } else {
+      return res.status(400).json("Unsupported payment verification payload");
     }
 
     /* ===============================

@@ -11,6 +11,7 @@ const UserAdminProfile = require("../models/UserAdminProfile");
 const bcrypt = require("bcrypt");
 const Ticket = require("../models/Ticket");
 const TicketReply = require("../models/TicketReply");
+const { Op } = require("sequelize");
 
 const BASE = "https://test.techzuno.com";
 
@@ -150,6 +151,44 @@ function normalizeArrayField(obj, key) {
   obj[key] = [];
 }
 
+async function getOrCreateLatestAdminProfile(userId) {
+  const profiles = await UserAdminProfile.findAll({
+    where: { user_id: userId },
+    order: [
+      ["updatedAt", "DESC"],
+      ["id", "DESC"],
+    ],
+  });
+
+  let adminProfile = profiles[0] || null;
+
+  if (!adminProfile) {
+    adminProfile = await UserAdminProfile.create({
+      user_id: userId,
+      profile_json: JSON.stringify({}),
+      contacts_json: JSON.stringify([]),
+    });
+    return adminProfile;
+  }
+
+  if (profiles.length > 1) {
+    const idsToRemove = profiles
+      .slice(1)
+      .map((p) => p?.id)
+      .filter(Boolean);
+    if (idsToRemove.length) {
+      await UserAdminProfile.destroy({
+        where: {
+          user_id: userId,
+          id: { [Op.in]: idsToRemove },
+        },
+      });
+    }
+  }
+
+  return adminProfile;
+}
+
 exports.getUserDetails = async (req, res) => {
   try {
     const userId = Number(req.params.id);
@@ -160,7 +199,21 @@ exports.getUserDetails = async (req, res) => {
     });
     if (!user) return res.status(404).json("User not found");
 
-    const [domains, hostingAccounts, orders, invoices, tickets] = await Promise.all([
+    const ordersInclude = Order?.associations?.Plan ? [{ model: Plan }] : [];
+    const ticketsInclude = Ticket?.associations?.TicketReplies
+      ? [{ model: TicketReply, required: false }]
+      : [];
+
+    const [
+      domains,
+      hostingAccounts,
+      orders,
+      invoices,
+      tickets,
+      domainsCount,
+      hostingCount,
+      ordersCount,
+    ] = await Promise.all([
       Domain.findAll({
         where: { user_id: userId },
         order: [["createdAt", "DESC"]],
@@ -171,7 +224,7 @@ exports.getUserDetails = async (req, res) => {
       }),
       Order.findAll({
         where: { user_id: userId },
-        include: [{ model: Plan }],
+        include: ordersInclude,
         order: [["createdAt", "DESC"]],
       }),
       Invoice.findAll({
@@ -180,22 +233,15 @@ exports.getUserDetails = async (req, res) => {
       }),
       Ticket.findAll({
         where: { user_id: userId },
-        include: [{ model: TicketReply, required: false }],
+        include: ticketsInclude,
         order: [["createdAt", "DESC"]],
       }),
+      Domain.count({ where: { user_id: userId } }),
+      HostingAccount.count({ where: { user_id: userId } }),
+      Order.count({ where: { user_id: userId } }),
     ]);
 
-    let adminProfile = await UserAdminProfile.findOne({
-      where: { user_id: userId },
-    });
-
-    if (!adminProfile) {
-      adminProfile = await UserAdminProfile.create({
-        user_id: userId,
-        profile_json: JSON.stringify({}),
-        contacts_json: JSON.stringify([]),
-      });
-    }
+    const adminProfile = await getOrCreateLatestAdminProfile(userId);
 
     const profile = safeJsonParse(adminProfile.profile_json, {});
     const contacts = safeJsonParse(adminProfile.contacts_json, []);
@@ -214,6 +260,12 @@ exports.getUserDetails = async (req, res) => {
       limit: 500,
     });
 
+    const userPlain = user?.get ? user.get({ plain: true }) : user;
+    const domainsPlain = (domains || []).map((d) => (d?.get ? d.get({ plain: true }) : d));
+    const hostingPlain = (hostingAccounts || []).map((h) => (h?.get ? h.get({ plain: true }) : h));
+    const ordersPlain = (orders || []).map((o) => (o?.get ? o.get({ plain: true }) : o));
+    const invoicesPlain = (invoices || []).map((i) => (i?.get ? i.get({ plain: true }) : i));
+
     const ticketsWithMeta = (tickets || []).map((t) => {
       const plain = t?.get ? t.get({ plain: true }) : t;
       const replies = Array.isArray(plain.TicketReplies) ? plain.TicketReplies : [];
@@ -228,20 +280,36 @@ exports.getUserDetails = async (req, res) => {
     });
 
     res.json({
-      user,
+      user: userPlain,
       profile,
       contacts,
-      domains,
-      hostingAccounts,
-      orders,
-      invoices,
+      domains: domainsPlain,
+      hostingAccounts: hostingPlain,
+      orders: ordersPlain,
+      invoices: invoicesPlain,
       tickets: ticketsWithMeta,
       emailLogs: emailLogs.map((e) => (e?.get ? e.get({ plain: true }) : e)),
+      meta: {
+        dbName: process.env.DB_NAME || null,
+        dbHost: process.env.DB_HOST || null,
+        serverTime: new Date().toISOString(),
+        tables: {
+          users: User.getTableName(),
+          domains: Domain.getTableName(),
+          hostingAccounts: HostingAccount.getTableName(),
+          orders: Order.getTableName(),
+        },
+        counts: {
+          domains: domainsCount,
+          hostingAccounts: hostingCount,
+          orders: ordersCount,
+        },
+      },
       summary: {
-        totalDomains: domains.length,
-        totalHostingAccounts: hostingAccounts.length,
-        totalOrders: orders.length,
-        totalInvoices: invoices.length,
+        totalDomains: domainsCount,
+        totalHostingAccounts: hostingCount,
+        totalOrders: ordersCount,
+        totalInvoices: invoicesPlain.length,
       },
     });
   } catch (err) {
@@ -264,6 +332,7 @@ exports.updateUserDetails = async (req, res) => {
     const updatableFields = [
       "name",
       "email",
+      "company",
       "phone",
       "address1",
       "address2",
@@ -287,17 +356,7 @@ exports.updateUserDetails = async (req, res) => {
 
     await existingUser.save();
 
-    let adminProfile = await UserAdminProfile.findOne({
-      where: { user_id: userId },
-    });
-
-    if (!adminProfile) {
-      adminProfile = await UserAdminProfile.create({
-        user_id: userId,
-        profile_json: JSON.stringify({}),
-        contacts_json: JSON.stringify([]),
-      });
-    }
+    const adminProfile = await getOrCreateLatestAdminProfile(userId);
 
     if (profile !== undefined) {
       const sanitizedProfile = { ...(profile || {}) };
