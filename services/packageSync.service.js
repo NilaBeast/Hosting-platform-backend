@@ -1,9 +1,17 @@
 const Plan = require("../models/Plan");
 const { fetchWHMPackages } = require("./whmPackage.service");
 
+let consecutiveFailures = 0;
+let lastFailureLogAt = 0;
+
 exports.syncPackagesToDB = async () => {
   try {
+    if (String(process.env.WHM_SYNC_ENABLED || "").toLowerCase() === "false") {
+      return;
+    }
+
     const packages = await fetchWHMPackages();
+    consecutiveFailures = 0;
 
     for (const pkg of packages) {
       const existing = await Plan.findOne({
@@ -34,6 +42,33 @@ exports.syncPackagesToDB = async () => {
       }
     }
   } catch (err) {
-    console.log("SYNC ERROR:", err);
+    consecutiveFailures += 1;
+    const message = err?.message ? String(err.message) : "Unknown error";
+    const code = err?.code ? String(err.code) : null;
+
+    const noisyNetworkCodes = new Set([
+      "ETIMEDOUT",
+      "ECONNABORTED",
+      "ECONNREFUSED",
+      "ENOTFOUND",
+      "EAI_AGAIN",
+    ]);
+
+    const now = Date.now();
+    const shouldLog =
+      !code ||
+      !noisyNetworkCodes.has(code) ||
+      lastFailureLogAt === 0 ||
+      now - lastFailureLogAt > 10 * 60 * 1000;
+
+    if (shouldLog) {
+      lastFailureLogAt = now;
+      console.log(
+        "SYNC ERROR:",
+        code
+          ? `${message} (code=${code}, failures=${consecutiveFailures})`
+          : `${message} (failures=${consecutiveFailures})`
+      );
+    }
   }
 };
