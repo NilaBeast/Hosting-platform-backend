@@ -160,22 +160,103 @@ async function getOrCreateLatestAdminProfile(userId) {
     ],
   });
 
-  let adminProfile = profiles[0] || null;
-
-  if (!adminProfile) {
-    adminProfile = await UserAdminProfile.create({
+  if (!profiles.length) {
+    return UserAdminProfile.create({
       user_id: userId,
       profile_json: JSON.stringify({}),
       contacts_json: JSON.stringify([]),
     });
-    return adminProfile;
   }
 
-  if (profiles.length > 1) {
-    const idsToRemove = profiles
+  const asObject = (value, fallback) => safeJsonParse(value, fallback);
+
+  const score = (p) => {
+    const profileObj = asObject(p?.profile_json, {});
+    const contactsArr = asObject(p?.contacts_json, []);
+    const txCount = Array.isArray(profileObj?.transactions)
+      ? profileObj.transactions.length
+      : 0;
+    const billCount = Array.isArray(profileObj?.billableItems)
+      ? profileObj.billableItems.length
+      : 0;
+    const profileLen = typeof p?.profile_json === "string" ? p.profile_json.length : 0;
+    const contactsLen = typeof p?.contacts_json === "string" ? p.contacts_json.length : 0;
+    return txCount * 10000 + billCount * 5000 + profileLen + contactsLen;
+  };
+
+  const sorted = [...profiles].sort((a, b) => {
+    const sa = score(a);
+    const sb = score(b);
+    if (sb !== sa) return sb - sa;
+    const ua = a?.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+    const ub = b?.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+    if (ub !== ua) return ub - ua;
+    return Number(b?.id || 0) - Number(a?.id || 0);
+  });
+
+  const keep = sorted[0];
+
+  if (sorted.length > 1) {
+    const mergeByKey = (items, makeKey) => {
+      const out = [];
+      const seen = new Set();
+      for (const it of items) {
+        const key = makeKey(it);
+        if (!key) continue;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(it);
+      }
+      return out;
+    };
+
+    const allProfiles = sorted.map((p) => asObject(p?.profile_json, {}));
+    const allContacts = sorted.flatMap((p) => {
+      const c = asObject(p?.contacts_json, []);
+      return Array.isArray(c) ? c : [];
+    });
+
+    const merged = {};
+    for (const obj of allProfiles) {
+      if (!obj || typeof obj !== "object") continue;
+      for (const [k, v] of Object.entries(obj)) {
+        if (merged[k] === undefined) merged[k] = v;
+      }
+    }
+
+    const mergedTransactions = mergeByKey(
+      allProfiles.flatMap((p) => (Array.isArray(p?.transactions) ? p.transactions : [])),
+      (t) =>
+        t?.legacyId != null
+          ? `legacy:${t.legacyId}`
+          : [t?.createdAt || "", t?.description || "", t?.amountIn || 0, t?.amountOut || 0, t?.fees || 0].join("|")
+    );
+
+    const mergedBillableItems = mergeByKey(
+      allProfiles.flatMap((p) => (Array.isArray(p?.billableItems) ? p.billableItems : [])),
+      (it) =>
+        it?.legacyId != null
+          ? `legacy:${it.legacyId}`
+          : [it?.createdAt || "", it?.description || "", it?.amount || 0].join("|")
+    );
+
+    const mergedContacts = mergeByKey(
+      allContacts,
+      (c) => [c?.email || "", c?.phone || "", c?.firstName || "", c?.lastName || ""].join("|")
+    );
+
+    merged.transactions = mergedTransactions;
+    merged.billableItems = mergedBillableItems;
+
+    keep.profile_json = JSON.stringify(merged);
+    keep.contacts_json = JSON.stringify(mergedContacts);
+    await keep.save();
+
+    const idsToRemove = sorted
       .slice(1)
       .map((p) => p?.id)
       .filter(Boolean);
+
     if (idsToRemove.length) {
       await UserAdminProfile.destroy({
         where: {
@@ -186,7 +267,7 @@ async function getOrCreateLatestAdminProfile(userId) {
     }
   }
 
-  return adminProfile;
+  return keep;
 }
 
 exports.getUserDetails = async (req, res) => {
@@ -248,6 +329,8 @@ exports.getUserDetails = async (req, res) => {
 
     normalizeArrayField(profile, "billableItems");
     normalizeArrayField(profile, "transactions");
+    const legacyEmails =
+      Array.isArray(profile?.emails) ? profile.emails : safeJsonParse(profile?.emails, null);
     delete profile.quotes;
     delete profile.notes;
     delete profile.logs;
@@ -259,6 +342,28 @@ exports.getUserDetails = async (req, res) => {
       order: [["createdAt", "DESC"]],
       limit: 500,
     });
+
+    const emailLogsForResponse =
+      Array.isArray(emailLogs) && emailLogs.length
+        ? emailLogs
+        : Array.isArray(legacyEmails)
+          ? legacyEmails
+              .map((m) => ({
+                user_id: userId,
+                direction: "outgoing",
+                source: "legacy-profile",
+                legacy_key: m?.legacyId != null ? `profile_emails:${m.legacyId}` : null,
+                from_email: m?.from || null,
+                to_email: m?.to || user?.email || null,
+                subject: m?.subject || null,
+                body_text: m?.body || m?.message || null,
+                body_html: null,
+                status: "sent",
+                createdAt: m?.createdAt || null,
+                updatedAt: m?.createdAt || null,
+              }))
+              .filter((x) => x.to_email)
+          : [];
 
     const userPlain = user?.get ? user.get({ plain: true }) : user;
     const domainsPlain = (domains || []).map((d) => (d?.get ? d.get({ plain: true }) : d));
@@ -288,7 +393,7 @@ exports.getUserDetails = async (req, res) => {
       orders: ordersPlain,
       invoices: invoicesPlain,
       tickets: ticketsWithMeta,
-      emailLogs: emailLogs.map((e) => (e?.get ? e.get({ plain: true }) : e)),
+      emailLogs: emailLogsForResponse.map((e) => (e?.get ? e.get({ plain: true }) : e)),
       meta: {
         dbName: process.env.DB_NAME || null,
         dbHost: process.env.DB_HOST || null,

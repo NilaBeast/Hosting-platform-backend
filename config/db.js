@@ -1,5 +1,6 @@
 const { Sequelize } = require("sequelize");
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 /* ===============================
    CREATE SEQUELIZE INSTANCE
@@ -14,7 +15,7 @@ const sequelize = new Sequelize(
 
     /* 🔥 CONNECTION POOL (VERY IMPORTANT) */
     pool: {
-      max: 10,        // max connections
+      max: 5,        // max connections
       min: 0,
       acquire: 60000, // wait up to 60s
       idle: 10000,    // release idle connections
@@ -29,24 +30,14 @@ const sequelize = new Sequelize(
   }
 );
 
-/* ===============================
-   TEST DB CONNECTION
-================================ */
-async function connectDB() {
+sequelize.addHook("afterConnect", async (connection) => {
+  const conn = typeof connection?.promise === "function" ? connection.promise() : connection;
   try {
-    console.log("⏳ Connecting to MySQL...");
-
-    await sequelize.authenticate();
-
-    console.log("✅ MySQL Database Connected Successfully");
-  } catch (error) {
-    console.error("❌ Unable to connect to MySQL:", error.message);
-
-    // Optional: exit process if DB fails
-    process.exit(1);
-  }
-}
-
-connectDB();
+    await conn.query("SET SESSION innodb_lock_wait_timeout = 10");
+  } catch {}
+  try {
+    await conn.query("SET SESSION lock_wait_timeout = 10");
+  } catch {}
+});
 
 module.exports = sequelize;

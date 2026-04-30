@@ -12,6 +12,7 @@ const Ticket = require("./models/Ticket");
 const TicketReply = require("./models/TicketReply");
 const UserAdminProfile = require("./models/UserAdminProfile");
 const EmailLog = require("./models/EmailLog");
+const Plan = require("./models/Plan");
 
 const DEFAULT_SQL_PATH =
   "c:\\Users\\Nilajeet Basak\\Desktop\\Techzuno Office\\cloudsensy_bill.sql";
@@ -797,6 +798,13 @@ async function extractFromSql(sqlPath) {
   }
 
   output.sort((a, b) => (a.user?.id ?? 0) - (b.user?.id ?? 0));
+  Object.defineProperty(output, "legacyProducts", {
+    value: Array.from(productsById.values()).map((p) => ({
+      id: p?.id ?? null,
+      name: coerceString(p?.name) ?? null,
+    })),
+    enumerable: false,
+  });
   return output;
 }
 
@@ -823,7 +831,46 @@ async function importToDb(extracted, opts) {
     email_logs_created: 0,
     tickets_created: 0,
     ticket_replies_created: 0,
+    plans_created: 0,
   };
+
+  const legacyProducts = Array.isArray(extracted?.legacyProducts)
+    ? extracted.legacyProducts
+    : [];
+
+  const planNames = new Set();
+  for (const p of legacyProducts) {
+    const name = coerceString(p?.name);
+    if (name) planNames.add(name);
+  }
+  for (const row of extracted || []) {
+    const name = coerceString(row?.currentPlanIfActive?.productName);
+    if (name) planNames.add(name);
+  }
+
+  if (planNames.size) {
+    const existingPlans = await Plan.findAll({
+      attributes: ["whm_package_name"],
+    });
+    const existing = new Set(
+      (existingPlans || [])
+        .map((p) => (p?.get ? p.get({ plain: true }) : p))
+        .map((p) => coerceString(p?.whm_package_name))
+        .filter(Boolean)
+    );
+
+    for (const name of planNames) {
+      if (existing.has(name)) continue;
+      try {
+        await Plan.create({
+          name,
+          whm_package_name: name,
+          price: 0,
+        });
+        summary.plans_created++;
+      } catch {}
+    }
+  }
 
   const mergeByLegacyId = (existing, incoming) => {
     const a = Array.isArray(existing) ? existing : [];
@@ -1338,6 +1385,16 @@ async function importToDb(extracted, opts) {
   return summary;
 }
 
+async function runMigration(options = {}) {
+  const sqlPath = options.sqlPath || DEFAULT_SQL_PATH;
+  const extracted = await extractFromSql(sqlPath);
+  const summary = await importToDb(extracted, {
+    dryRun: Boolean(options.dryRun),
+    sync: Boolean(options.sync),
+  });
+  return { summary };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const sqlPath = args.sqlPath;
@@ -1427,7 +1484,16 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`${err?.stack || err?.message || String(err)}\n`);
-  process.exitCode = 1;
-});
+module.exports = {
+  DEFAULT_SQL_PATH,
+  extractFromSql,
+  importToDb,
+  runMigration,
+};
+
+if (require.main === module) {
+  main().catch((err) => {
+    process.stderr.write(`${err?.stack || err?.message || String(err)}\n`);
+    process.exitCode = 1;
+  });
+}

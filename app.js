@@ -1,6 +1,4 @@
 require("./models"); // 🔥 THIS IS MISSING
-require("./cron/packageSync.cron");
-require("./cron/domainPricing.cron"); // start cron
 const express = require("express");
 const app = express();
 const cors = require("cors");
