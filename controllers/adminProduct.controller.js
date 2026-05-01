@@ -2,6 +2,7 @@ const ProductGroup = require("../models/ProductGroup");
 const Product = require("../models/Product");
 const Plan = require("../models/Plan");
 const slugify = require("slugify");
+const { fetchWHMPackages } = require("../services/whmPackage.service");
 
 async function killMysqlConnection(connectionId) {
   const id = Number(connectionId);
@@ -240,14 +241,22 @@ exports.createProduct = async (req, res) => {
 
     /* 🔥 LINK PLAN */
     if (whm_package_name) {
-      const plan = await Plan.findOne({
+      let plan = await Plan.findOne({
         where: { whm_package_name },
       });
 
+      if (!plan) {
+        try {
+          plan = await Plan.create({
+            name: whm_package_name,
+            whm_package_name,
+            price: 0,
+          });
+        } catch {}
+      }
+
       if (plan) {
-        await plan.update({
-          product_id: product.id,
-        });
+        await plan.update({ product_id: product.id });
       }
     }
 
@@ -371,6 +380,22 @@ exports.getWHMPackages = async (req, res) => {
   });
 
   res.json(plans);
+};
+
+exports.getWHMPackagesLive = async (req, res) => {
+  try {
+    const pkgs = await fetchWHMPackages();
+    const out = (pkgs || [])
+      .map((p) => ({
+        id: p?.name,
+        name: p?.name,
+        whm_package_name: p?.name,
+      }))
+      .filter((p) => p.name);
+    res.json(out);
+  } catch (err) {
+    res.status(502).json(String(err?.message || err));
+  }
 };
 
 /* ================= SLUG BASED PRODUCT ================= */

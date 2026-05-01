@@ -19,5 +19,6 @@ router.post("/product", auth, admin, controller.createProduct);
 router.get("/products", auth, admin, controller.getProducts);
 router.put("/product/:id", auth, admin, controller.updateProduct);
 router.delete("/product/:id", auth, admin, controller.deleteProduct);
+router.get("/whm-packages", auth, admin, controller.getWHMPackagesLive);
 router.get("/store/:groupSlug/:productSlug", controller.getProductBySlug);
 module.exports = router;
