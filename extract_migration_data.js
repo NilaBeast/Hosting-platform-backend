@@ -13,6 +13,7 @@ const TicketReply = require("./models/TicketReply");
 const UserAdminProfile = require("./models/UserAdminProfile");
 const EmailLog = require("./models/EmailLog");
 const Plan = require("./models/Plan");
+const Order = require("./models/Order");
 
 const DEFAULT_SQL_PATH =
   "c:\\Users\\Nilajeet Basak\\Desktop\\Techzuno Office\\cloudsensy_bill.sql";
@@ -1245,8 +1246,9 @@ async function importToDb(extracted, opts) {
           where: { user_id: userId, invoice_number: invoiceNumber },
           transaction,
         });
-        if (!existingInvoice) {
-          await Invoice.create(
+        let invoiceRow = existingInvoice;
+        if (!invoiceRow) {
+          invoiceRow = await Invoice.create(
             {
               user_id: userId,
               order_id: null,
@@ -1257,10 +1259,68 @@ async function importToDb(extracted, opts) {
                 typeof inv.total === "number" ? inv.total : Number(inv.total || 0) || 0,
               status: coerceString(inv.status) || "unknown",
               pdf_path: null,
+              invoice_type: "legacy",
+              meta_json: JSON.stringify({ legacyInvoiceId: legacyId }),
             },
             { transaction },
           );
           summary.invoices_created++;
+        }
+
+        const paymentId = invoiceNumber;
+        const existingOrder = await Order.findOne({
+          where: { user_id: userId, payment_id: paymentId },
+          transaction,
+        });
+
+        if (!existingOrder) {
+          const activeHosting = row?.currentPlanIfActive || null;
+          const domainFromHosting = coerceString(activeHosting?.domain) || null;
+          const fallbackDomain =
+            coerceString(row?.domains?.[0]?.domain) ||
+            coerceString(row?.domains?.[0]?.name) ||
+            null;
+          const domain = domainFromHosting || fallbackDomain;
+
+          const billingCycle = coerceString(activeHosting?.billingcycle) || null;
+          const productName = coerceString(activeHosting?.productName) || null;
+
+          let planId = null;
+          if (productName) {
+            const plan =
+              (await Plan.findOne({
+                where: { whm_package_name: productName },
+                transaction,
+              })) ||
+              (await Plan.findOne({
+                where: { name: productName },
+                transaction,
+              }));
+            planId = plan?.id || null;
+          }
+
+          const statusRaw = String(inv?.status || "").toLowerCase();
+          const isPaid = statusRaw === "paid";
+
+          await Order.create(
+            {
+              user_id: userId,
+              plan_id: planId,
+              domain: domain,
+              billing_cycle: billingCycle,
+              plan_price: Number(invoiceRow.amount || 0) || 0,
+              domain_price: 0,
+              total_price: Number(invoiceRow.amount || 0) || 0,
+              status: isPaid ? "paid" : "pending",
+              domain_status: "active",
+              type: "hosting",
+              payment_id: paymentId,
+              payment_gateway: "legacy",
+              createdAt: parseDate(inv?.createdAt) || undefined,
+              updatedAt: parseDate(inv?.updatedAt) || parseDate(inv?.createdAt) || undefined,
+            },
+            { transaction },
+          );
         }
       }
 

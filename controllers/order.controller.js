@@ -76,6 +76,7 @@ exports.createOrder = async (req, res) => {
       user_id,
       plan_id: plan.id,
       domain,
+      billing_cycle: billing_cycle || null,
       plan_price: productPrice,
       domain_price: domainPrice,
       total_price: total,

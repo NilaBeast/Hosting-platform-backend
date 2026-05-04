@@ -12,6 +12,35 @@ const Plan = require("../models/Plan");
 const { generateInvoicePDF } = require("./invoice.service");
 const { sendInvoiceMail } = require("./invoiceMail.service");
 
+function addMonths(date, months) {
+  const d = new Date(date);
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + months);
+  if (d.getDate() !== day) d.setDate(0);
+  return d;
+}
+
+function normalizeBillingCycle(value) {
+  const v = String(value || "").trim().toLowerCase();
+  const map = new Map([
+    ["monthly", { months: 1, label: "Monthly" }],
+    ["month", { months: 1, label: "Monthly" }],
+    ["1 month", { months: 1, label: "Monthly" }],
+    ["quarterly", { months: 3, label: "Quarterly" }],
+    ["quaterly", { months: 3, label: "Quarterly" }],
+    ["3 months", { months: 3, label: "Quarterly" }],
+    ["semiannually", { months: 6, label: "Semi Annually" }],
+    ["semi-annually", { months: 6, label: "Semi Annually" }],
+    ["semi annually", { months: 6, label: "Semi Annually" }],
+    ["6 months", { months: 6, label: "Semi Annually" }],
+    ["annually", { months: 12, label: "Annually" }],
+    ["annual", { months: 12, label: "Annually" }],
+    ["1 year", { months: 12, label: "Annually" }],
+    ["yearly", { months: 12, label: "Annually" }],
+  ]);
+  return map.get(v) || null;
+}
+
 /* ===============================
    PASSWORD GENERATOR
 ================================ */
@@ -96,15 +125,58 @@ exports.handleOrderSuccess = async (order, meta = {}) => {
     /* ===============================
        SAVE HOSTING ACCOUNT
     ============================== */
-    await HostingAccount.create({
-      user_id: normalizedOrder.user_id,
-      cpanel_username: username,
-      domain: normalizedOrder.domain,
-      email: user.email,
-      password,
-      login_url: loginUrl,
-      status: "active",
+    const existingHosting = await HostingAccount.findOne({
+      where: { user_id: normalizedOrder.user_id, domain: normalizedOrder.domain },
     });
+
+    let hostingRecord = null;
+
+    if (!existingHosting) {
+      hostingRecord = await HostingAccount.create({
+        user_id: normalizedOrder.user_id,
+        cpanel_username: username,
+        domain: normalizedOrder.domain,
+        email: user.email,
+        password,
+        login_url: loginUrl,
+        status: "active",
+        service_name: productName,
+        billing_cycle: billingCycle,
+        next_due_date: nextDueDate,
+        recurring_amount: planPrice || null,
+        overdue_invoice_id: null,
+        overdue_started_at: null,
+        overdue_notice_count: 0,
+        last_overdue_notice_at: null,
+        suspended_at: null,
+        terminated_at: null,
+      });
+    } else {
+      try {
+        if (existingHosting.status === "suspended" && existingHosting.cpanel_username) {
+          await whmService.unsuspendAccount(existingHosting.cpanel_username);
+        }
+      } catch {}
+
+      await existingHosting.update({
+        cpanel_username: existingHosting.cpanel_username || username,
+        email: existingHosting.email || user.email,
+        password: password || existingHosting.password,
+        login_url: loginUrl || existingHosting.login_url,
+        status: "active",
+        service_name: existingHosting.service_name || productName,
+        billing_cycle: billingCycle || existingHosting.billing_cycle,
+        next_due_date: nextDueDate || existingHosting.next_due_date,
+        recurring_amount: planPrice || existingHosting.recurring_amount,
+        overdue_invoice_id: null,
+        overdue_started_at: null,
+        overdue_notice_count: 0,
+        last_overdue_notice_at: null,
+        suspended_at: null,
+        terminated_at: null,
+      });
+      hostingRecord = existingHosting;
+    }
 
     console.log("✅ Hosting saved");
 
@@ -131,6 +203,7 @@ exports.handleOrderSuccess = async (order, meta = {}) => {
     const invoice = await Invoice.create({
       user_id: normalizedOrder.user_id,
       order_id: normalizedOrder.id || null,
+      hosting_account_id: hostingRecord?.id || null,
       invoice_number: invoiceNumber,
       customer_name: user.name,
       email: user.email,
@@ -147,7 +220,10 @@ exports.handleOrderSuccess = async (order, meta = {}) => {
 
     // 🔥 Hosting Item
     const planPrice = Number(normalizedOrder.plan_price || 0);
-    const billingCycle = normalizedOrder.billing_cycle || "One Time";
+    const billingCycle = normalizedOrder.billing_cycle || normalizedOrder?.billing_cycle || null;
+    const cycleInfo = normalizeBillingCycle(billingCycle);
+    const now = new Date();
+    const nextDueDate = cycleInfo ? addMonths(now, cycleInfo.months) : null;
     let hostingLabel = groupName ? `${groupName} - ${productName}` : productName;
     if (packageName && packageName !== "default") {
       hostingLabel = `${hostingLabel} - ${packageName}`;

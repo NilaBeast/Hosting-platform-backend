@@ -24,6 +24,35 @@ function generateStrongPassword() {
   ).join("");
 }
 
+function addMonths(date, months) {
+  const d = new Date(date);
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + months);
+  if (d.getDate() !== day) d.setDate(0);
+  return d;
+}
+
+function normalizeBillingCycle(value) {
+  const v = String(value || "").trim().toLowerCase();
+  const map = new Map([
+    ["monthly", { months: 1 }],
+    ["month", { months: 1 }],
+    ["1 month", { months: 1 }],
+    ["quarterly", { months: 3 }],
+    ["quaterly", { months: 3 }],
+    ["3 months", { months: 3 }],
+    ["semiannually", { months: 6 }],
+    ["semi-annually", { months: 6 }],
+    ["semi annually", { months: 6 }],
+    ["6 months", { months: 6 }],
+    ["annually", { months: 12 }],
+    ["annual", { months: 12 }],
+    ["1 year", { months: 12 }],
+    ["yearly", { months: 12 }],
+  ]);
+  return map.get(v) || null;
+}
+
 function getRazorpayAuth() {
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
@@ -420,15 +449,60 @@ exports.verifyPayment = async (req, res) => {
 
     const loginUrl = await whmService.createCpanelSession(username);
 
-    await HostingAccount.create({
-      user_id: user.id,
-      cpanel_username: username,
-      domain: order.domain,
-      email: user.email,
-      password,
-      login_url: loginUrl,
-      status: "active",
+    const cycleInfo = normalizeBillingCycle(order?.billing_cycle);
+    const nextDueDate = cycleInfo ? addMonths(new Date(), cycleInfo.months) : null;
+
+    const existingHosting = await HostingAccount.findOne({
+      where: { user_id: user.id, domain: order.domain },
     });
+
+    let hostingRecord = null;
+    if (!existingHosting) {
+      hostingRecord = await HostingAccount.create({
+        user_id: user.id,
+        cpanel_username: username,
+        domain: order.domain,
+        email: user.email,
+        password,
+        login_url: loginUrl,
+        status: "active",
+        service_name: productName,
+        billing_cycle: order?.billing_cycle || null,
+        next_due_date: nextDueDate,
+        recurring_amount: Number(order.plan_price || 0) || null,
+        overdue_invoice_id: null,
+        overdue_started_at: null,
+        overdue_notice_count: 0,
+        last_overdue_notice_at: null,
+        suspended_at: null,
+        terminated_at: null,
+      });
+    } else {
+      try {
+        if (existingHosting.status === "suspended" && existingHosting.cpanel_username) {
+          await whmService.unsuspendAccount(existingHosting.cpanel_username);
+        }
+      } catch {}
+
+      await existingHosting.update({
+        cpanel_username: existingHosting.cpanel_username || username,
+        email: existingHosting.email || user.email,
+        password: password || existingHosting.password,
+        login_url: loginUrl || existingHosting.login_url,
+        status: "active",
+        service_name: existingHosting.service_name || productName,
+        billing_cycle: order?.billing_cycle || existingHosting.billing_cycle,
+        next_due_date: nextDueDate || existingHosting.next_due_date,
+        recurring_amount: Number(order.plan_price || 0) || existingHosting.recurring_amount,
+        overdue_invoice_id: null,
+        overdue_started_at: null,
+        overdue_notice_count: 0,
+        last_overdue_notice_at: null,
+        suspended_at: null,
+        terminated_at: null,
+      });
+      hostingRecord = existingHosting;
+    }
 
     await Domain.create({
       user_id: user.id,
@@ -445,6 +519,7 @@ exports.verifyPayment = async (req, res) => {
     const invoice = await Invoice.create({
       user_id: user.id,
       order_id: order.id,
+      hosting_account_id: hostingRecord?.id || null,
       invoice_number: invoiceNumber,
       customer_name: user.name,
       email: user.email,

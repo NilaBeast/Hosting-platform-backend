@@ -94,3 +94,43 @@ exports.createCpanelSession = async (username) => {
     throw error;
   }
 };
+
+exports.suspendAccount = async (username, reason) => {
+  const response = await axios.get(`${whmConfig.host}/json-api/suspendacct`, {
+    httpsAgent,
+    headers: {
+      Authorization: `whm ${whmConfig.user}:${whmConfig.token}`,
+    },
+    params: {
+      user: username,
+      reason: reason || "Overdue invoice",
+    },
+  });
+  return response.data;
+};
+
+exports.unsuspendAccount = async (username) => {
+  const response = await axios.get(`${whmConfig.host}/json-api/unsuspendacct`, {
+    httpsAgent,
+    headers: {
+      Authorization: `whm ${whmConfig.user}:${whmConfig.token}`,
+    },
+    params: {
+      user: username,
+    },
+  });
+  return response.data;
+};
+
+exports.terminateAccount = async (username) => {
+  const response = await axios.get(`${whmConfig.host}/json-api/removeacct`, {
+    httpsAgent,
+    headers: {
+      Authorization: `whm ${whmConfig.user}:${whmConfig.token}`,
+    },
+    params: {
+      user: username,
+    },
+  });
+  return response.data;
+};

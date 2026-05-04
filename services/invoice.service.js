@@ -48,10 +48,15 @@ exports.generateInvoicePDF = async (invoice, items) => {
       /* ================= INVOICE INFO ================= */
       doc.fontSize(10);
 
+      const invoiceDateRaw = invoice?.createdAt || invoice?.invoice_date || new Date();
+      const dueDateRaw = invoice?.due_date || invoice?.next_due_date || invoiceDateRaw;
+      const invoiceDate = invoiceDateRaw instanceof Date ? invoiceDateRaw : new Date(invoiceDateRaw);
+      const dueDate = dueDateRaw instanceof Date ? dueDateRaw : new Date(dueDateRaw);
+
       doc.text(`Invoice No: ${invoice.invoice_number}`, 50, 180);
-      doc.text(`Invoice Date: ${new Date().toLocaleDateString()}`, 50, 200);
+      doc.text(`Invoice Date: ${invoiceDate.toLocaleDateString()}`, 50, 200);
       doc.text(`Terms: Custom`, 50, 220);
-      doc.text(`Due Date: ${new Date().toLocaleDateString()}`, 50, 240);
+      doc.text(`Due Date: ${Number.isFinite(dueDate.getTime()) ? dueDate.toLocaleDateString() : "-"}`, 50, 240);
 
       /* ================= BILL TO ================= */
       doc.text("Bill To:", 350, 180);

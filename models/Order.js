@@ -5,6 +5,7 @@ const Order = sequelize.define("Order", {
   user_id: DataTypes.INTEGER,
   plan_id: DataTypes.INTEGER,
   domain: DataTypes.STRING,
+  billing_cycle: DataTypes.STRING,
 
   plan_price: DataTypes.FLOAT,
   domain_price: DataTypes.FLOAT,
