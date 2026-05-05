@@ -80,7 +80,6 @@ exports.createOrder = async (req, res) => {
       plan_price: productPrice,
       domain_price: domainPrice,
       total_price: total,
-      cashfree_order_id: null,
       payment_session_id: null,
       status: "paid",
       domain_status: "active",

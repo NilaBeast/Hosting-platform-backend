@@ -23,7 +23,6 @@ const Order = sequelize.define("Order", {
 
   payment_gateway: DataTypes.STRING,
 
-  cashfree_order_id: DataTypes.STRING,
   payment_session_id: DataTypes.STRING,
   razorpay_order_id: DataTypes.STRING,
   razorpay_payment_id: DataTypes.STRING,

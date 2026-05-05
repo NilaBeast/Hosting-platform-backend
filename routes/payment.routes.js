@@ -5,6 +5,7 @@ const {
   createPaymentOrder,
   createDomainOrder, // 🔥 NEW
   verifyPayment,
+  payuCallback,
   getMyOrders,
 } = require("../controllers/payment.controller");
 
@@ -22,6 +23,8 @@ router.post("/create-domain-order", auth, createDomainOrder);
    VERIFY PAYMENT
 ================================ */
 router.post("/verify", auth, verifyPayment);
+
+router.post("/payu/callback", payuCallback);
 
 /* ===============================
    USER ORDERS
